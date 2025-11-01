@@ -115,43 +115,22 @@ int main(int argc, char* argv[]) {
     // - set the mask bits of the shape
     b2CreatePolygonShape(groundBodyId, &groundShapeDef, &groundBox);
 
-    // Create one falling block
-    b2BodyDef bodyDef = b2DefaultBodyDef();
-    bodyDef.type = b2_dynamicBody;
-    bodyDef.position = {SCREEN_WIDTH / PIXELS_PER_METER / 2.0f, 20.0f};
-    bodyDef.fixedRotation = true;  // Prevent rotation
-    // float initialAngle = 45.0f * M_PI / 180.0f;  // 45 degrees in radians
-    // bodyDef.rotation = {sqrt(2)/2.0f,sqrt(2)/2.0f};  // b2Rot is {cos, sin}
+    // Create the player character
+    b2BodyDef playerDef = b2DefaultBodyDef();
+    playerDef.type = b2_dynamicBody;
+    playerDef.position = {5.0f, 10.0f}; // starting position in meters
+    playerDef.fixedRotation = true;      // prevent rotation
+    b2BodyId playerBodyId = b2CreateBody(worldId, &playerDef);
 
-    b2BodyId boxBodyId = b2CreateBody(worldId, &bodyDef);
+    b2Polygon playerBox = b2MakeBox(0.5f, 1.0f); // 1x2 meters player
+    b2ShapeDef playerShapeDef = b2DefaultShapeDef();
+    playerShapeDef.density = 1.0f;
+    b2ShapeId playerShapeId = b2CreatePolygonShape(playerBodyId, &playerShapeDef, &playerBox);
 
-    // b2Circle circle;
-    // circle.center = {0.0f, 0.0f};
-    // circle.radius = 1.0f;
-    b2Polygon box;
-    box = b2MakeBox(1.0f, 1.0f); // 2x2 meters box (same as before)
-    b2ShapeDef shapeDef = b2DefaultShapeDef();
-    shapeDef.density = 1.0f;
-    //shapeDef.enableContactEvents = true;  // Enable collision detection
-    // b2ShapeId boxShapeId = b2CreateCircleShape(boxBodyId, &shapeDef, &circle);
-    b2ShapeId boxShapeId = b2CreatePolygonShape(boxBodyId, &shapeDef, &box);
-    b2Shape_SetRestitution(boxShapeId, 0.0f);
+    b2Shape_SetRestitution(playerShapeId, 0.0f); // no bounce
+    b2Shape_SetFriction(playerShapeId, 0.8f);    // some friction
     
     
-
-    // Create distance joint between box and ground (300 pixels = 15 meters), allow collisions between connected bodies
-    // b2DistanceJointDef distanceJointDef = b2DefaultDistanceJointDef();
-    // distanceJointDef.bodyIdA = groundBodyId;
-    // distanceJointDef.bodyIdB = boxBodyId;
-    // distanceJointDef.localAnchorA = {1.0f, 0.0f};  // Center of ground
-    // distanceJointDef.localAnchorB = {0.0f, 0.0f};  // Center of box
-    // // distanceJointDef.length = 300.0f / PIXELS_PER_METER;  // 300 pixels = 15 meters
-    // distanceJointDef.minLength = 100.0f / PIXELS_PER_METER;  // Allow compression
-    // distanceJointDef.maxLength = 300.0f / PIXELS_PER_METER;  // Fixed max length
-    // // distanceJointDef.maxLengthOnly = true; // Allow only compression
-    // distanceJointDef.collideConnected = true; // Allow collision between box and ground
-    // b2JointId distanceJointId = b2CreateDistanceJoint(worldId, &distanceJointDef);
-
     // Main loop
     bool quit = false;
     SDL_Event e;
@@ -159,9 +138,11 @@ int main(int argc, char* argv[]) {
     const float timeStep = 1.0f / 60.0f;
     const int subStepCount = 100;
 
-    printf("Box2D Simple Demo\n");
-    printf("Press ESC to quit\n");
-    printf("Block should fall and bounce on the platform!\n");
+    printf("Alien Game Demo\n");
+    printf("Controls:\n");
+    printf("  LEFT/RIGHT Arrow Keys or A/D - Move\n");
+    printf("  UP Arrow or SPACE - Jump\n");
+    printf("  ESC - Quit\n");
 
     while (!quit) {
         // Handle events
@@ -181,25 +162,36 @@ int main(int argc, char* argv[]) {
 
         // Step the world
         b2World_Step(worldId, timeStep, subStepCount);
+        
+        const float moveSpeed = 5.0f;   // meters per second
+        const float jumpImpulse = 8.0f;
 
-        // // Get contact events and print "ouch" for any collisions
-        // b2ContactEvents contactEvents = b2World_GetContactEvents(worldId);
-        // if (contactEvents.beginCount> 0) {
-        //     b2ContactBeginTouchEvent* event = contactEvents.beginEvents;
-        //     for (int i = 0; i < contactEvents.beginCount; i++) {
-        //         // b2BodyId bodyIdA = event->bodyIdA;
-        //         // b2BodyId bodyIdB = event->bodyIdB;
-        //         b2ShapeId shapeIdA = event->shapeIdA;
-        //         b2ShapeId shapeIdB = event->shapeIdB;
-        //         b2Body_SetLinearVelocity(b2Shape_GetBody(shapeIdB), {10.0f, 10.0f});
-        //         b2Body_SetLinearVelocity(b2Shape_GetBody(shapeIdA), {10.0f, 10.0f});
-        //         event++;
-        //         // b2Vec2 point = event->point;
-        //         // b2Vec2 normal = event->normal;
-        //         // b2Vec2 tangent = event->tangent;
-        //         // b2Vec2 impulse = event->impulse;
-        //     }
-        // }
+        const Uint8* keyState = SDL_GetKeyboardState(NULL);
+        b2Vec2 velocity = b2Body_GetLinearVelocity(playerBodyId);
+
+        // Check if player is touching anything using contact data
+        static bool canJump = false;
+        b2ContactData contactData[16]; // Buffer for contacts
+        int contactCount = b2Body_GetContactData(playerBodyId, contactData, 16);
+        canJump = (contactCount > 0);
+
+        // Move left/right with Arrow keys
+        if (keyState[SDL_SCANCODE_LEFT])  velocity.x = -moveSpeed;
+        if (keyState[SDL_SCANCODE_RIGHT]) velocity.x =  moveSpeed;
+        
+        // Move left/right with WASD
+        if (keyState[SDL_SCANCODE_A])  velocity.x = -moveSpeed;
+        if (keyState[SDL_SCANCODE_D])  velocity.x =  moveSpeed;
+        
+        // Jump with Space or Up Arrow
+        if ((keyState[SDL_SCANCODE_SPACE] || keyState[SDL_SCANCODE_UP]) && canJump) {
+            velocity.y = jumpImpulse;
+            canJump = false;
+        }
+
+        b2Body_SetLinearVelocity(playerBodyId, velocity);
+
+
 
         // Clear screen
         SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
@@ -223,18 +215,18 @@ int main(int argc, char* argv[]) {
         };
         SDL_RenderFillRect(renderer, &groundRect);
 
-        // Draw box with rotation
-        b2Vec2 position = b2Body_GetPosition(boxBodyId);
-        b2Rot rotation = b2Body_GetRotation(boxBodyId);
-        float angleDegrees = b2Rot_GetAngle(rotation)*180.0f/M_PI;
         
+
+        b2Vec2 playerPos = b2Body_GetPosition(playerBodyId);
         drawRotatedRect(renderer,
-                       worldToScreenX(position.x),
-                       worldToScreenY(position.y),
-                       2.0f * PIXELS_PER_METER,
-                       2.0f * PIXELS_PER_METER,
-                       -angleDegrees,  // Negate because screen Y is flipped
-                       200, 100, 100, 255);
+                        worldToScreenX(playerPos.x),
+                        worldToScreenY(playerPos.y),
+                        1.0f * PIXELS_PER_METER,   // width in pixels
+                        2.0f * PIXELS_PER_METER,   // height in pixels
+                        0.0f,                      // no rotation
+                        100, 100, 250, 255);       // color: blue
+        // ===============================
+
 
         // Present
         SDL_RenderPresent(renderer);
