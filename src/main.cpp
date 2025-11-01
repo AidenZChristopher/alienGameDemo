@@ -62,7 +62,7 @@ int main(int argc, char* argv[]) {
     }
 
     SDL_Window* window = SDL_CreateWindow(
-        "Box2D Simple Demo - Falling Block",
+        "Alien Game Demo",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
         SCREEN_WIDTH,
@@ -135,7 +135,7 @@ int main(int argc, char* argv[]) {
     //shapeDef.enableContactEvents = true;  // Enable collision detection
     // b2ShapeId boxShapeId = b2CreateCircleShape(boxBodyId, &shapeDef, &circle);
     b2ShapeId boxShapeId = b2CreatePolygonShape(boxBodyId, &shapeDef, &box);
-    b2Shape_SetRestitution(boxShapeId, .8f);
+    b2Shape_SetRestitution(boxShapeId, 0.0f);
     
     
 
@@ -182,24 +182,24 @@ int main(int argc, char* argv[]) {
         // Step the world
         b2World_Step(worldId, timeStep, subStepCount);
 
-        // Get contact events and print "ouch" for any collisions
-        b2ContactEvents contactEvents = b2World_GetContactEvents(worldId);
-        if (contactEvents.beginCount> 0) {
-            b2ContactBeginTouchEvent* event = contactEvents.beginEvents;
-            for (int i = 0; i < contactEvents.beginCount; i++) {
-                // b2BodyId bodyIdA = event->bodyIdA;
-                // b2BodyId bodyIdB = event->bodyIdB;
-                b2ShapeId shapeIdA = event->shapeIdA;
-                b2ShapeId shapeIdB = event->shapeIdB;
-                b2Body_SetLinearVelocity(b2Shape_GetBody(shapeIdB), {10.0f, 10.0f});
-                b2Body_SetLinearVelocity(b2Shape_GetBody(shapeIdA), {10.0f, 10.0f});
-                event++;
-                // b2Vec2 point = event->point;
-                // b2Vec2 normal = event->normal;
-                // b2Vec2 tangent = event->tangent;
-                // b2Vec2 impulse = event->impulse;
-            }
-        }
+        // // Get contact events and print "ouch" for any collisions
+        // b2ContactEvents contactEvents = b2World_GetContactEvents(worldId);
+        // if (contactEvents.beginCount> 0) {
+        //     b2ContactBeginTouchEvent* event = contactEvents.beginEvents;
+        //     for (int i = 0; i < contactEvents.beginCount; i++) {
+        //         // b2BodyId bodyIdA = event->bodyIdA;
+        //         // b2BodyId bodyIdB = event->bodyIdB;
+        //         b2ShapeId shapeIdA = event->shapeIdA;
+        //         b2ShapeId shapeIdB = event->shapeIdB;
+        //         b2Body_SetLinearVelocity(b2Shape_GetBody(shapeIdB), {10.0f, 10.0f});
+        //         b2Body_SetLinearVelocity(b2Shape_GetBody(shapeIdA), {10.0f, 10.0f});
+        //         event++;
+        //         // b2Vec2 point = event->point;
+        //         // b2Vec2 normal = event->normal;
+        //         // b2Vec2 tangent = event->tangent;
+        //         // b2Vec2 impulse = event->impulse;
+        //     }
+        // }
 
         // Clear screen
         SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
