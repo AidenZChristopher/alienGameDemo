@@ -5,10 +5,13 @@ The engine supports:
 Player movement with gravity, jumping, and collision handling
 
 Moving and static platforms
+<img width="987" height="776" alt="Screenshot 2025-11-01 235148" src="https://github.com/user-attachments/assets/1309ecf8-6247-4974-a118-408d9bbfd5c5" />
 
 Animated sprite sheets
 
 Patrolling and bouncing enemies
+<img width="996" height="774" alt="Screenshot 2025-11-01 235250" src="https://github.com/user-attachments/assets/b83545cd-b9dc-44e8-b57c-7b9cc855dd9c" />
+<img width="990" height="770" alt="Screenshot 2025-11-01 235258" src="https://github.com/user-attachments/assets/42d3aaa6-197c-4422-ad9a-61364ad4fce5" />
 
 A following camera system
 
