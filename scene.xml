@@ -1,0 +1,29 @@
+<Scene>
+    <!-- Player GameObject -->
+    <GameObject id="1">
+        <BodyComponent x="100" y="400" width="50" height="50" velocityX="0" velocityY="0" angle="0" />
+        <SpriteComponent textureKey="hero_texture.png" />
+        <ControllerComponent />
+    </GameObject>
+
+    <!-- Patrol Enemy -->
+    <GameObject id="2">
+        <BodyComponent x="300" y="450" width="40" height="40" velocityX="0" velocityY="0" angle="0" />
+        <SpriteComponent textureKey="enemy_texture.png" />
+        <PatrolBehaviorComponent left="250" right="500" speed="150" />
+    </GameObject>
+
+    <!-- Bouncing Platform -->
+    <GameObject id="3">
+        <BodyComponent x="500" y="300" width="60" height="30" velocityX="0" velocityY="0" angle="0" />
+        <SpriteComponent textureKey="platform_texture.png" />
+        <BounceBehaviorComponent amplitude="50" frequency="3" />
+    </GameObject>
+
+    <!-- Additional Bouncing Enemy -->
+    <GameObject id="4">
+        <BodyComponent x="600" y="200" width="35" height="35" velocityX="0" velocityY="0" angle="0" />
+        <SpriteComponent textureKey="enemy_texture.png" />
+        <BounceBehaviorComponent amplitude="75" frequency="2" />
+    </GameObject>
+</Scene>

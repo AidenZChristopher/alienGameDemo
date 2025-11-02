@@ -35,6 +35,7 @@ target_compile_definitions(demo PRIVATE SDL_MAIN_HANDLED)
 # Copy assets and DLLs
 add_custom_command(TARGET demo POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:demo>/assets
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/scene.xml $<TARGET_FILE_DIR:demo>/scene.xml
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:demo> $<TARGET_FILE_DIR:demo>
     COMMAND_EXPAND_LISTS
 )
