@@ -9,6 +9,7 @@
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <sstream>
 
 // ========================
 // Forward Declarations
@@ -260,59 +261,86 @@ public:
     SpriteComponent(const std::string& textureKey = "", SDL_Color color = {255, 255, 255, 255}) 
         : m_textureKey(textureKey), m_color(color), m_texture(nullptr) {}
     
-    void update(float dt) override {
-        // Update animation frame if needed
-        if(m_animated) {
-            m_animationTimer += dt;
-            if(m_animationTimer >= m_frameDuration) {
-                m_animationTimer = 0;
-                m_currentFrame = (m_currentFrame + 1) % m_totalFrames;
+        void update(float dt) override {
+            // Update animation frame if needed
+            if(m_animated) {
+                m_animationTimer += dt;
+                if(m_animationTimer >= m_frameDuration) {
+                    m_animationTimer = 0;
+                    int oldFrame = m_currentFrame;
+                    m_currentFrame = (m_currentFrame + 1) % m_totalFrames;
+                    
+                    // Debug: Print animation progress occasionally
+                    static int debugCounter = 0;
+                    if (debugCounter++ % 60 == 0) {
+                        std::cout << "Animation - Frame: " << m_currentFrame << "/" << m_totalFrames 
+                                  << ", Animated: " << m_animated 
+                                  << ", Using Sprite Sheet: " << m_usingSpriteSheet << std::endl;
+                    }
+                }
             }
         }
-    }
-    
-    void draw(SDL_Renderer* renderer, const Camera& camera) override {
-        auto body = parent().get<BodyComponent>();
-        if(!body) return;
         
-        SDL_Rect destRect = {
-            static_cast<int>(camera.worldToScreenX(body->x)),
-            static_cast<int>(camera.worldToScreenY(body->y)),
-            static_cast<int>(body->width),
-            static_cast<int>(body->height)
-        };
-        
-        // If we have a texture, use it (stretched to fit the body)
-        if(m_texture) {
-            // For platforms: stretch the texture to fit the platform width
-            // For sprites with animation: use sprite sheet logic
-            if(m_usingSpriteSheet) {
-                // Calculate row and column for multi-row sprite sheets
-                int row = m_currentFrame / m_framesPerRow;
-                int col = m_currentFrame % m_framesPerRow;
-                
-                SDL_Rect srcRect = {
-                    m_spriteWidth * col,
-                    m_spriteHeight * row,
-                    m_spriteWidth,
-                    m_spriteHeight
-                };
-                
-                SDL_RenderCopy(renderer, m_texture, &srcRect, &destRect);
-            } else {
-                // For static textures (like platforms): use entire texture stretched
-                SDL_RenderCopy(renderer, m_texture, NULL, &destRect);
-            }
-        } 
-        // Otherwise fall back to colored rectangles
-        else {
-            SDL_SetRenderDrawColor(renderer, m_color.r, m_color.g, m_color.b, 255);
-            SDL_RenderFillRect(renderer, &destRect);
+        void draw(SDL_Renderer* renderer, const Camera& camera) override {
+            auto body = parent().get<BodyComponent>();
+            if(!body) return;
             
-            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-            SDL_RenderDrawRect(renderer, &destRect);
+            SDL_Rect destRect = {
+                static_cast<int>(camera.worldToScreenX(body->x)),
+                static_cast<int>(camera.worldToScreenY(body->y)),
+                static_cast<int>(body->width),
+                static_cast<int>(body->height)
+            };
+            
+            // Debug: Print draw info occasionally
+            static int drawDebugCounter = 0;
+            if (drawDebugCounter++ % 120 == 0) {
+                std::cout << "=== DRAW DEBUG ===" << std::endl;
+                std::cout << "Texture: " << (m_texture ? "LOADED" : "NULL") << std::endl;
+                std::cout << "Using Sprite Sheet: " << m_usingSpriteSheet << std::endl;
+                std::cout << "Animated: " << m_animated << std::endl;
+                std::cout << "Current Frame: " << m_currentFrame << std::endl;
+                std::cout << "Total Frames: " << m_totalFrames << std::endl;
+                std::cout << "Frame Size: " << m_spriteWidth << "x" << m_spriteHeight << std::endl;
+            }
+            
+            // If we have a texture, use it (stretched to fit the body)
+            if(m_texture) {
+                // For platforms: stretch the texture to fit the platform width
+                // For sprites with animation: use sprite sheet logic
+                if(m_usingSpriteSheet) {
+                    // Calculate row and column for multi-row sprite sheets
+                    int row = m_currentFrame / m_framesPerRow;
+                    int col = m_currentFrame % m_framesPerRow;
+                    
+                    SDL_Rect srcRect = {
+                        m_spriteWidth * col,
+                        m_spriteHeight * row,
+                        m_spriteWidth,
+                        m_spriteHeight
+                    };
+                    
+                    // Debug source rectangle
+                    if (drawDebugCounter % 120 == 0) {
+                        std::cout << "Source Rect: " << srcRect.x << "," << srcRect.y 
+                                  << " " << srcRect.w << "x" << srcRect.h << std::endl;
+                    }
+                    
+                    SDL_RenderCopy(renderer, m_texture, &srcRect, &destRect);
+                } else {
+                    // For static textures (like platforms): use entire texture stretched
+                    SDL_RenderCopy(renderer, m_texture, NULL, &destRect);
+                }
+            } 
+            // Otherwise fall back to colored rectangles
+            else {
+                SDL_SetRenderDrawColor(renderer, m_color.r, m_color.g, m_color.b, 255);
+                SDL_RenderFillRect(renderer, &destRect);
+                
+                SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+                SDL_RenderDrawRect(renderer, &destRect);
+            }
         }
-    }
     
     // Texture management methods
     void setTexture(SDL_Texture* texture) { 
@@ -620,6 +648,288 @@ public:
 };
 
 // ========================
+// XML Parser
+// ========================
+// ========================
+// XML Parser
+// ========================
+class XMLParser {
+    public:
+        static std::vector<std::unique_ptr<GameObject>> parseXML(SDL_Renderer* renderer, const std::string& filename);
+        
+        // Make this method public
+        static std::string extractAttribute(const std::string& line, const std::string& attrName);
+    
+    private:
+        static SDL_Color parseColor(const std::string& colorStr);
+        static std::unique_ptr<GameObject> createGameObject(SDL_Renderer* renderer, const std::string& type, 
+                                                           const std::unordered_map<std::string, std::string>& attrs);
+        static std::string readCompleteTag(std::ifstream& file, std::string firstLine);
+    };
+    
+    // Implementation of extractAttribute (outside the class)
+    std::string XMLParser::extractAttribute(const std::string& line, const std::string& attrName) {
+        size_t pos = line.find(attrName + "=\"");
+        if (pos == std::string::npos) return "";
+        
+        pos += attrName.length() + 2; // Move past attrName="
+        size_t endPos = line.find("\"", pos);
+        if (endPos == std::string::npos) return "";
+        
+        return line.substr(pos, endPos - pos);
+    }
+    
+    // Helper function to read a complete XML tag that might span multiple lines
+    std::string XMLParser::readCompleteTag(std::ifstream& file, std::string firstLine) {
+        std::string completeTag = firstLine;
+        
+        // Check if the tag is already complete (ends with /> or >)
+        if (firstLine.find("/>") != std::string::npos || firstLine.find(">") != std::string::npos) {
+            return completeTag;
+        }
+        
+        // Continue reading lines until we find the end of the tag
+        std::string line;
+        while (std::getline(file, line)) {
+            // Remove whitespace
+            line.erase(0, line.find_first_not_of(" \t\r\n"));
+            line.erase(line.find_last_not_of(" \t\r\n") + 1);
+            
+            if (line.empty()) continue;
+            
+            completeTag += " " + line;
+            
+            // Check if the tag is now complete
+            if (line.find("/>") != std::string::npos || line.find(">") != std::string::npos) {
+                break;
+            }
+        }
+        
+        return completeTag;
+    }
+    
+    // Implementation of parseXML
+    std::vector<std::unique_ptr<GameObject>> XMLParser::parseXML(SDL_Renderer* renderer, const std::string& filename) {
+        std::vector<std::unique_ptr<GameObject>> gameObjects;
+        
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "Failed to open XML file: " << filename << std::endl;
+            return gameObjects;
+        }
+        
+        std::string line;
+        std::string currentObjectType;
+        std::unordered_map<std::string, std::string> currentAttributes;
+        
+        while (std::getline(file, line)) {
+            // Remove whitespace
+            line.erase(0, line.find_first_not_of(" \t\r\n"));
+            line.erase(line.find_last_not_of(" \t\r\n") + 1);
+            
+            if (line.empty()) continue;
+            
+            // Check for component tags and read complete tags
+            if (line.find("<GameObject") != std::string::npos) {
+                std::string completeTag = readCompleteTag(file, line);
+                currentObjectType = extractAttribute(completeTag, "type");
+                currentAttributes.clear();
+                std::cout << "GameObject: " << currentObjectType << std::endl;
+            }
+            else if (line.find("<BodyComponent") != std::string::npos) {
+                std::string completeTag = readCompleteTag(file, line);
+                currentAttributes["x"] = extractAttribute(completeTag, "x");
+                currentAttributes["y"] = extractAttribute(completeTag, "y");
+                currentAttributes["width"] = extractAttribute(completeTag, "width");
+                currentAttributes["height"] = extractAttribute(completeTag, "height");
+                std::cout << "BodyComponent: " << currentAttributes["x"] << "," << currentAttributes["y"] 
+                          << " " << currentAttributes["width"] << "x" << currentAttributes["height"] << std::endl;
+            }
+            else if (line.find("<SpriteComponent") != std::string::npos) {
+                std::string completeTag = readCompleteTag(file, line);
+                currentAttributes["textureKey"] = extractAttribute(completeTag, "textureKey");
+                currentAttributes["spriteSheet"] = extractAttribute(completeTag, "spriteSheet");
+                currentAttributes["frameWidth"] = extractAttribute(completeTag, "frameWidth");
+                currentAttributes["frameHeight"] = extractAttribute(completeTag, "frameHeight");
+                currentAttributes["totalFrames"] = extractAttribute(completeTag, "totalFrames");
+                currentAttributes["frameRate"] = extractAttribute(completeTag, "frameRate");
+                currentAttributes["color"] = extractAttribute(completeTag, "color");
+                
+                std::cout << "SpriteComponent - textureKey: " << currentAttributes["textureKey"] 
+                          << ", spriteSheet: " << currentAttributes["spriteSheet"] 
+                          << ", frameWidth: " << currentAttributes["frameWidth"] 
+                          << ", frameHeight: " << currentAttributes["frameHeight"] 
+                          << ", totalFrames: " << currentAttributes["totalFrames"] 
+                          << ", frameRate: " << currentAttributes["frameRate"] << std::endl;
+            }
+            else if (line.find("<PatrolBehaviorComponent") != std::string::npos) {
+                std::string completeTag = readCompleteTag(file, line);
+                currentAttributes["left"] = extractAttribute(completeTag, "left");
+                currentAttributes["right"] = extractAttribute(completeTag, "right");
+                currentAttributes["speed"] = extractAttribute(completeTag, "speed");
+            }
+            else if (line.find("<BounceBehaviorComponent") != std::string::npos) {
+                std::string completeTag = readCompleteTag(file, line);
+                currentAttributes["amplitude"] = extractAttribute(completeTag, "amplitude");
+                currentAttributes["frequency"] = extractAttribute(completeTag, "frequency");
+            }
+            else if (line.find("<HorizontalMoveBehaviorComponent") != std::string::npos) {
+                std::string completeTag = readCompleteTag(file, line);
+                currentAttributes["left"] = extractAttribute(completeTag, "left");
+                currentAttributes["right"] = extractAttribute(completeTag, "right");
+                currentAttributes["speed"] = extractAttribute(completeTag, "speed");
+            }
+            else if (line.find("</GameObject>") != std::string::npos) {
+                // Create the GameObject with all collected attributes
+                auto obj = createGameObject(renderer, currentObjectType, currentAttributes);
+                if (obj) {
+                    gameObjects.push_back(std::move(obj));
+                }
+                currentAttributes.clear();
+                std::cout << "--- Finished GameObject ---" << std::endl;
+            }
+        }
+        
+        file.close();
+        std::cout << "Parsed " << gameObjects.size() << " GameObjects from XML" << std::endl;
+        return gameObjects;
+    }
+    
+    // Implementation of parseColor
+    SDL_Color XMLParser::parseColor(const std::string& colorStr) {
+        SDL_Color color = {255, 255, 255, 255}; // Default white
+        if (colorStr.empty()) return color;
+        
+        std::stringstream ss(colorStr);
+        std::string token;
+        std::vector<int> rgb;
+        
+        while (std::getline(ss, token, ',')) {
+            rgb.push_back(std::stoi(token));
+        }
+        
+        if (rgb.size() >= 3) {
+            color.r = rgb[0];
+            color.g = rgb[1];
+            color.b = rgb[2];
+        }
+        
+        return color;
+    }
+    
+    // Implementation of createGameObject
+    std::unique_ptr<GameObject> XMLParser::createGameObject(SDL_Renderer* renderer, const std::string& type, 
+                                                           const std::unordered_map<std::string, std::string>& attrs) {
+        auto& textureManager = TextureManager::getInstance();
+        auto obj = std::make_unique<GameObject>();
+        
+        if (type == "player") {
+            // Player
+            float x = std::stof(attrs.at("x"));
+            float y = std::stof(attrs.at("y"));
+            float width = std::stof(attrs.at("width"));
+            float height = std::stof(attrs.at("height"));
+            
+            obj->add<BodyComponent>(x, y, width, height);
+            
+            auto sprite = obj->add<SpriteComponent>(attrs.at("textureKey"));
+            SDL_Texture* texture = textureManager.getTexture(attrs.at("textureKey"));
+            if (texture) {
+                sprite->setTexture(texture);
+            }
+            
+            // Check if sprite sheet should be configured
+            if (attrs.find("spriteSheet") != attrs.end() && attrs.at("spriteSheet") == "true") {
+                int frameWidth = std::stoi(attrs.at("frameWidth"));
+                int frameHeight = std::stoi(attrs.at("frameHeight"));
+                int totalFrames = std::stoi(attrs.at("totalFrames"));
+                float frameRate = std::stof(attrs.at("frameRate"));
+                
+                std::cout << "=== CONFIGURING PLAYER SPRITE SHEET ===" << std::endl;
+                std::cout << "Frame: " << frameWidth << "x" << frameHeight << std::endl;
+                std::cout << "Frames: " << totalFrames << " at " << frameRate << " fps" << std::endl;
+                
+                sprite->setSpriteSheet(frameWidth, frameHeight, totalFrames, frameRate);
+            }
+            
+            obj->add<ControllerComponent>();
+        }
+        else if (type == "platform" || type == "moving_platform") {
+            // Platform
+            float x = std::stof(attrs.at("x"));
+            float y = std::stof(attrs.at("y"));
+            float width = std::stof(attrs.at("width"));
+            float height = std::stof(attrs.at("height"));
+            
+            obj->add<BodyComponent>(x, y, width, height);
+            obj->add<SolidComponent>();
+            
+            // Handle sprite with texture or color
+            if (attrs.find("textureKey") != attrs.end() && !attrs.at("textureKey").empty()) {
+                auto sprite = obj->add<SpriteComponent>(attrs.at("textureKey"));
+                SDL_Texture* texture = textureManager.getTexture(attrs.at("textureKey"));
+                if (texture) {
+                    sprite->setTexture(texture);
+                }
+            } else if (attrs.find("color") != attrs.end()) {
+                SDL_Color color = parseColor(attrs.at("color"));
+                obj->add<SpriteComponent>("", color);
+            }
+            
+            // Moving platform behavior
+            if (type == "moving_platform") {
+                float left = std::stof(attrs.at("left"));
+                float right = std::stof(attrs.at("right"));
+                float speed = std::stof(attrs.at("speed"));
+                obj->add<HorizontalMoveBehaviorComponent>(left, right, speed);
+            }
+        }
+        else if (type == "enemy" || type == "flying_enemy") {
+            // Enemy
+            float x = std::stof(attrs.at("x"));
+            float y = std::stof(attrs.at("y"));
+            float width = std::stof(attrs.at("width"));
+            float height = std::stof(attrs.at("height"));
+            
+            obj->add<BodyComponent>(x, y, width, height);
+            obj->add<EnemyComponent>();
+            
+            auto sprite = obj->add<SpriteComponent>(attrs.at("textureKey"));
+            SDL_Texture* texture = textureManager.getTexture(attrs.at("textureKey"));
+            if (texture) {
+                sprite->setTexture(texture);
+            }
+            
+            // Check if sprite sheet should be configured
+            if (attrs.find("spriteSheet") != attrs.end() && attrs.at("spriteSheet") == "true") {
+                int frameWidth = std::stoi(attrs.at("frameWidth"));
+                int frameHeight = std::stoi(attrs.at("frameHeight"));
+                int totalFrames = std::stoi(attrs.at("totalFrames"));
+                float frameRate = std::stof(attrs.at("frameRate"));
+                
+                std::cout << "=== CONFIGURING ENEMY SPRITE SHEET ===" << std::endl;
+                std::cout << "Frame: " << frameWidth << "x" << frameHeight << std::endl;
+                std::cout << "Frames: " << totalFrames << " at " << frameRate << " fps" << std::endl;
+                
+                sprite->setSpriteSheet(frameWidth, frameHeight, totalFrames, frameRate);
+            }
+            
+            // Enemy behavior
+            if (type == "enemy") {
+                float left = std::stof(attrs.at("left"));
+                float right = std::stof(attrs.at("right"));
+                float speed = std::stof(attrs.at("speed"));
+                obj->add<PatrolBehaviorComponent>(left, right, speed);
+            } else if (type == "flying_enemy") {
+                float amplitude = std::stof(attrs.at("amplitude"));
+                float frequency = std::stof(attrs.at("frequency"));
+                obj->add<BounceBehaviorComponent>(amplitude, frequency);
+            }
+        }
+        
+        return obj;
+    }
+// ========================
 // XML Component Factory
 // ========================
 class XMLComponentFactory {
@@ -629,119 +939,41 @@ public:
         
         std::cout << "Loading game objects from: " << filename << std::endl;
         
-        // Load textures first
-        loadTextures(renderer);
+        // Load textures first from the XML
+        loadTexturesFromXML(renderer, filename);
         
-        // Create game objects
-        createSimulatedXMLObjects(gameObjects, renderer);
+        // Parse the XML file to create game objects
+        gameObjects = XMLParser::parseXML(renderer, filename);
         
         return gameObjects;
     }
     
 private:
-    static void loadTextures(SDL_Renderer* renderer) {
+    static void loadTexturesFromXML(SDL_Renderer* renderer, const std::string& filename) {
         auto& textureManager = TextureManager::getInstance();
         
-        // Load your sprite sheets with correct dimensions
-        textureManager.loadTexture(renderer, "assets/character.bmp", "player_texture");
-        textureManager.loadTexture(renderer, "assets/enemy.bmp", "enemy_texture");
-        textureManager.loadTexture(renderer, "assets/tileset.bmp", "tile_texture");
-        
-        // Debug: Check if texture loaded
-        SDL_Texture* tileTex = textureManager.getTexture("tile_texture");
-        if(tileTex) {
-            int w, h;
-            SDL_QueryTexture(tileTex, NULL, NULL, &w, &h);
-            std::cout << "Tileset dimensions: " << w << "x" << h << std::endl;
-        } else {
-            std::cout << "Tileset failed to load!" << std::endl;
-        }
-    }
-        
-    static void createSimulatedXMLObjects(std::vector<std::unique_ptr<GameObject>>& gameObjects, SDL_Renderer* renderer) {
-        auto& textureManager = TextureManager::getInstance();
-        
-        // Player with 12-frame sprite sheet (single row, 128x96 per frame)
-        auto player = std::make_unique<GameObject>();
-        player->add<BodyComponent>(100, 400, 128, 96); // Match sprite size
-        auto playerSprite = player->add<SpriteComponent>("player_texture");
-        playerSprite->setTexture(textureManager.getTexture("player_texture"));
-        playerSprite->setSpriteSheet(128, 96, 12, 12.0f); // 128x96 per frame, 12 total frames
-        player->add<ControllerComponent>();
-        gameObjects.push_back(std::move(player));
-        
-        // Platforms with tileset textures
-        createPlatforms(gameObjects, renderer);
-        
-        // Enemies with sprite sheets
-        createEnemies(gameObjects, renderer);
-        
-        std::cout << "Created " << gameObjects.size() << " GameObjects from XML configuration" << std::endl;
-    }
-    
-    static void createPlatforms(std::vector<std::unique_ptr<GameObject>>& gameObjects, SDL_Renderer* renderer) {
-        auto& textureManager = TextureManager::getInstance();
-        
-        // Platform positions and sizes - all use the same single tile
-        std::vector<std::tuple<float, float, float>> platforms = {
-            // x, y, width
-            {0, 500, 400}, 
-            {600, 500, 400},
-            {1500, 500, 500},
-            {2200, 500, 200},
-            {2600, 500, 1000}
-        };
-        
-        for(const auto& [x, y, width] : platforms) {
-            auto platform = std::make_unique<GameObject>();
-            platform->add<BodyComponent>(x, y, width, 58); // Match tile height (58px)
-            auto sprite = platform->add<SpriteComponent>("tile_texture");
-            sprite->setTexture(textureManager.getTexture("tile_texture"));
-            // DON'T set up as sprite sheet - just use the texture as-is
-            // This will stretch the 96x58 texture to fit the platform width
-            platform->add<SolidComponent>();
-            gameObjects.push_back(std::move(platform));
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "ERROR: Failed to open XML file: " << filename << std::endl;
+            return;
         }
         
-        // Moving platform - use colored rectangle (no texture)
-        auto movingPlatform = std::make_unique<GameObject>();
-        movingPlatform->add<BodyComponent>(1250, 450, 150, 20); // Smaller platform
-        auto movingSprite = movingPlatform->add<SpriteComponent>("", SDL_Color{150, 150, 255, 255}); // Blue color
-        // No texture set - will use colored rectangle fallback
-        movingPlatform->add<HorizontalMoveBehaviorComponent>(1050, 1450, 75);
-        movingPlatform->add<SolidComponent>();
-        gameObjects.push_back(std::move(movingPlatform));
-    }
-    
-    static void createEnemies(std::vector<std::unique_ptr<GameObject>>& gameObjects, SDL_Renderer* renderer) {
-        auto& textureManager = TextureManager::getInstance();
-        
-        // Patrolling enemy - 83x64 per frame (664 ÷ 8 = 83)
-        auto enemy1 = std::make_unique<GameObject>();
-        enemy1->add<BodyComponent>(1600, 442, 83, 64); // Adjusted Y position for 58px platform
-        auto enemy1Sprite = enemy1->add<SpriteComponent>("enemy_texture");
-        enemy1Sprite->setTexture(textureManager.getTexture("enemy_texture"));
-        enemy1Sprite->setSpriteSheet(83, 64, 8, 8.0f); // 83x64 per frame, 8 total frames
-        enemy1->add<PatrolBehaviorComponent>(1575, 1950, 100);
-        enemy1->add<EnemyComponent>();
-        gameObjects.push_back(std::move(enemy1));
-        
-        // Flying enemies
-        std::vector<std::tuple<float, float, float, float>> flyingEnemies = {
-            {2750, 330, 80, 2.2f}, {2850, 340, 100, 1.5f}, {2950, 330, 90, 2.2f},
-            {3150, 375, 80, 2.0f}, {3200, 340, 80, 2.5f}
-        };
-        
-        for(const auto& [x, y, amp, freq] : flyingEnemies) {
-            auto enemy = std::make_unique<GameObject>();
-            enemy->add<BodyComponent>(x, y, 83, 64);
-            auto enemySprite = enemy->add<SpriteComponent>("enemy_texture");
-            enemySprite->setTexture(textureManager.getTexture("enemy_texture"));
-            enemySprite->setSpriteSheet(83, 64, 8, 10.0f);
-            enemy->add<BounceBehaviorComponent>(amp, freq);
-            enemy->add<EnemyComponent>();
-            gameObjects.push_back(std::move(enemy));
+        std::cout << "=== Loading Textures from XML ===" << std::endl;
+        std::string line;
+        while (std::getline(file, line)) {
+            if (line.find("<Texture") != std::string::npos) {
+                std::string filePath = XMLParser::extractAttribute(line, "file");
+                std::string textureKey = XMLParser::extractAttribute(line, "key");
+                
+                if (!filePath.empty() && !textureKey.empty()) {
+                    std::cout << "Found texture definition: " << textureKey << " -> " << filePath << std::endl;
+                    textureManager.loadTexture(renderer, filePath, textureKey);
+                }
+            }
         }
+        
+        file.close();
+        std::cout << "=== Finished Loading Textures ===" << std::endl;
     }
 };
 
