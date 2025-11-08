@@ -88,31 +88,39 @@ public:
     }
     
     SDL_Texture* loadTexture(SDL_Renderer* renderer, const std::string& filePath, const std::string& textureKey) {
-        // Check if texture already loaded
+        // DEBUG
+        std::cout << "=== LOADING TEXTURE ===" << std::endl;
+        std::cout << "File: " << filePath << std::endl;
+        std::cout << "Key: " << textureKey << std::endl;
+        
+        // Always remove existing texture first
         auto it = m_textures.find(textureKey);
         if(it != m_textures.end()) {
-            return it->second;
+            SDL_DestroyTexture(it->second);
+            m_textures.erase(it);
+            std::cout << "Removed old cached texture" << std::endl;
         }
         
-        // Load new texture (using BMP for simplicity - you can use SDL_image for PNG)
+        // Load new texture
         SDL_Surface* surface = SDL_LoadBMP(filePath.c_str());
         if(!surface) {
-            std::cerr << "Failed to load image: " << filePath << " - " << SDL_GetError() << std::endl;
-            // Create a placeholder surface if file not found
+            std::cerr << "FAILED to load BMP: " << filePath << " - " << SDL_GetError() << std::endl;
             surface = SDL_CreateRGBSurface(0, 64, 64, 32, 0, 0, 0, 0);
-            SDL_FillRect(surface, NULL, SDL_MapRGB(surface->format, 255, 0, 255)); // Magenta placeholder
+            SDL_FillRect(surface, NULL, SDL_MapRGB(surface->format, 255, 0, 255));
+        } else {
+            std::cout << "Successfully loaded BMP: " << surface->w << "x" << surface->h << std::endl;
         }
         
         SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
         SDL_FreeSurface(surface);
         
         if(!texture) {
-            std::cerr << "Failed to create texture: " << textureKey << " - " << SDL_GetError() << std::endl;
+            std::cerr << "FAILED to create texture from surface: " << SDL_GetError() << std::endl;
             return nullptr;
         }
         
         m_textures[textureKey] = texture;
-        std::cout << "Loaded texture: " << textureKey << std::endl;
+        std::cout << "Texture created and cached successfully" << std::endl;
         return texture;
     }
     
@@ -449,9 +457,21 @@ class SpriteComponent : public Component {
             m_usingSpriteSheet = true;
             m_spriteWidth = tileWidth;
             m_spriteHeight = tileHeight;
-            m_currentFrame = tileY * m_framesPerRow + tileX; // Calculate frame index
+            
+            // For platforms, we don't use frame calculation - we use direct source rectangle
+            m_usingCustomSource = true;
+            m_customSrcRect = {
+                tileX * tileWidth,
+                tileY * tileHeight,
+                tileWidth,
+                tileHeight
+            };
+            
             m_animated = false; // Static for platforms
             m_totalFrames = 1; // Only using one frame
+            
+            std::cout << "Tile set to: (" << tileX << "," << tileY << ") at position (" 
+                      << m_customSrcRect.x << "," << m_customSrcRect.y << ")" << std::endl;
         }
     
         // Set specific source rectangle directly
@@ -834,23 +854,6 @@ class XMLParser {
                 std::cout << "BodyComponent: " << currentAttributes["x"] << "," << currentAttributes["y"] 
                           << " " << currentAttributes["width"] << "x" << currentAttributes["height"] << std::endl;
             }
-            else if (line.find("<SpriteComponent") != std::string::npos) {
-                std::string completeTag = readCompleteTag(file, line);
-                currentAttributes["textureKey"] = extractAttribute(completeTag, "textureKey");
-                currentAttributes["spriteSheet"] = extractAttribute(completeTag, "spriteSheet");
-                currentAttributes["frameWidth"] = extractAttribute(completeTag, "frameWidth");
-                currentAttributes["frameHeight"] = extractAttribute(completeTag, "frameHeight");
-                currentAttributes["totalFrames"] = extractAttribute(completeTag, "totalFrames");
-                currentAttributes["frameRate"] = extractAttribute(completeTag, "frameRate");
-                currentAttributes["color"] = extractAttribute(completeTag, "color");
-                
-                std::cout << "SpriteComponent - textureKey: " << currentAttributes["textureKey"] 
-                          << ", spriteSheet: " << currentAttributes["spriteSheet"] 
-                          << ", frameWidth: " << currentAttributes["frameWidth"] 
-                          << ", frameHeight: " << currentAttributes["frameHeight"] 
-                          << ", totalFrames: " << currentAttributes["totalFrames"] 
-                          << ", frameRate: " << currentAttributes["frameRate"] << std::endl;
-            }
             else if (line.find("<PatrolBehaviorComponent") != std::string::npos) {
                 std::string completeTag = readCompleteTag(file, line);
                 currentAttributes["left"] = extractAttribute(completeTag, "left");
@@ -987,6 +990,20 @@ class XMLParser {
                 SDL_Texture* texture = textureManager.getTexture(attrs.at("textureKey"));
                 if (texture) {
                     sprite->setTexture(texture);
+                    
+                    // === ADD TILE SUPPORT RIGHT HERE ===
+                    // Check if we should use a specific tile from the tilesheet
+                    if (attrs.find("tileX") != attrs.end() && attrs.find("tileY") != attrs.end()) {
+                        int tileX = std::stoi(attrs.at("tileX"));
+                        int tileY = std::stoi(attrs.at("tileY"));
+                        int tileWidth = std::stoi(attrs.at("tileWidth"));
+                        int tileHeight = std::stoi(attrs.at("tileHeight"));
+                        
+                        sprite->setTile(tileX, tileY, tileWidth, tileHeight);
+                        std::cout << "Platform using tile: " << tileX << "," << tileY 
+                                  << " (" << tileWidth << "x" << tileHeight << ")" << std::endl;
+                    }
+                    // === END OF TILE SUPPORT ===
                 }
             } else if (attrs.find("color") != attrs.end()) {
                 SDL_Color color = parseColor(attrs.at("color"));
@@ -1067,48 +1084,6 @@ class XMLParser {
                       << " scroll: (" << scrollSpeedX << "," << scrollSpeedY << ")" << std::endl;
             
             obj->add<TilingBackgroundComponent>(textureKey, scrollSpeedX, scrollSpeedY);
-        }
-        else if (type == "platform" || type == "moving_platform") {
-            // Platform
-            float x = std::stof(attrs.at("x"));
-            float y = std::stof(attrs.at("y"));
-            float width = std::stof(attrs.at("width"));
-            float height = std::stof(attrs.at("height"));
-            
-            obj->add<BodyComponent>(x, y, width, height);
-            obj->add<SolidComponent>();
-            
-            // Handle sprite with texture or color
-            if (attrs.find("textureKey") != attrs.end() && !attrs.at("textureKey").empty()) {
-                auto sprite = obj->add<SpriteComponent>(attrs.at("textureKey"));
-                SDL_Texture* texture = textureManager.getTexture(attrs.at("textureKey"));
-                if (texture) {
-                    sprite->setTexture(texture);
-                    
-                    // Check if we should use a specific tile from the tilesheet
-                    if (attrs.find("tileX") != attrs.end() && attrs.find("tileY") != attrs.end()) {
-                        int tileX = std::stoi(attrs.at("tileX"));
-                        int tileY = std::stoi(attrs.at("tileY"));
-                        int tileWidth = std::stoi(attrs.at("tileWidth"));
-                        int tileHeight = std::stoi(attrs.at("tileHeight"));
-                        
-                        sprite->setTile(tileX, tileY, tileWidth, tileHeight);
-                        std::cout << "Platform using tile: " << tileX << "," << tileY 
-                                  << " (" << tileWidth << "x" << tileHeight << ")" << std::endl;
-                    }
-                }
-            } else if (attrs.find("color") != attrs.end()) {
-                SDL_Color color = parseColor(attrs.at("color"));
-                obj->add<SpriteComponent>("", color);
-            }
-            
-            // Moving platform behavior
-            if (type == "moving_platform") {
-                float left = std::stof(attrs.at("left"));
-                float right = std::stof(attrs.at("right"));
-                float speed = std::stof(attrs.at("speed"));
-                obj->add<HorizontalMoveBehaviorComponent>(left, right, speed);
-            }
         }
         return obj;
     }
