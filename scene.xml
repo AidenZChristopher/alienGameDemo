@@ -17,350 +17,48 @@
         <ControllerComponent />
     </GameObject>
 
-    <!-- Platform 1 - Multiple 16x16 tiles -->
+    <!-- Platform 1 - Single stretched platform (256px wide) -->
     <GameObject type="platform">
-        <BodyComponent x="0" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
+        <BodyComponent x="0" y="500" width="272" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="2" tileY="3" tileWidth="16" tileHeight="16" />
         <SolidComponent />
     </GameObject>
 
+    <!-- Platform 2 - Single stretched platform (400px wide) -->
     <GameObject type="platform">
-        <BodyComponent x="16" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
+        <BodyComponent x="600" y="500" width="400" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="4" tileY="3" tileWidth="16" tileHeight="16" />
         <SolidComponent />
     </GameObject>
 
-    <GameObject type="platform">
-        <BodyComponent x="32" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="48" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="64" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="80" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="96" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="112" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="128" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="144" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="160" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="176" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="192" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="208" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="224" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="240" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="256" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <!-- Platform 2 - 25 tiles wide (400 pixels) -->
-    <GameObject type="platform">
-        <BodyComponent x="600" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="616" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="632" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="648" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="664" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="680" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="696" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="712" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="728" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="744" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="760" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="776" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="792" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="808" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="824" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="840" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="856" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="872" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="888" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="904" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="920" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="936" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="952" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="968" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="platform">
-        <BodyComponent x="984" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <SolidComponent />
-    </GameObject>
-
-    <!-- Moving Platform - Made of individual 16x16 tiles -->
+    <!-- Moving Platform - Single stretched platform (144px wide) -->
     <GameObject type="moving_platform">
-        <BodyComponent x="1250" y="450" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
+        <BodyComponent x="1250" y="450" width="144" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="4" tileY="3" tileWidth="16" tileHeight="16" />
         <HorizontalMoveBehaviorComponent left="1050" right="1450" speed="75" />
         <SolidComponent />
     </GameObject>
 
-    <GameObject type="moving_platform">
-        <BodyComponent x="1266" y="450" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <HorizontalMoveBehaviorComponent left="1050" right="1450" speed="75" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="moving_platform">
-        <BodyComponent x="1282" y="450" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <HorizontalMoveBehaviorComponent left="1050" right="1450" speed="75" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="moving_platform">
-        <BodyComponent x="1298" y="450" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <HorizontalMoveBehaviorComponent left="1050" right="1450" speed="75" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="moving_platform">
-        <BodyComponent x="1314" y="450" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <HorizontalMoveBehaviorComponent left="1050" right="1450" speed="75" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="moving_platform">
-        <BodyComponent x="1330" y="450" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <HorizontalMoveBehaviorComponent left="1050" right="1450" speed="75" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="moving_platform">
-        <BodyComponent x="1346" y="450" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <HorizontalMoveBehaviorComponent left="1050" right="1450" speed="75" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="moving_platform">
-        <BodyComponent x="1362" y="450" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <HorizontalMoveBehaviorComponent left="1050" right="1450" speed="75" />
-        <SolidComponent />
-    </GameObject>
-
-    <GameObject type="moving_platform">
-        <BodyComponent x="1378" y="450" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
-        <HorizontalMoveBehaviorComponent left="1050" right="1450" speed="75" />
-        <SolidComponent />
-    </GameObject>
-
-    <!-- Platform 3 - 31 tiles wide (500 pixels) -->
+    <!-- Platform 3 - Single stretched platform (500px wide) -->
     <GameObject type="platform">
-        <BodyComponent x="1500" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
+        <BodyComponent x="1500" y="500" width="500" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="4" tileY="3" tileWidth="16" tileHeight="16" />
         <SolidComponent />
     </GameObject>
 
-    <!-- ... continue with 30 more tiles for platform 3 (1500 to 2000) ... -->
-
-    <!-- Platform 4 - 12 tiles wide (200 pixels) -->
+    <!-- Platform 4 - Single stretched platform (200px wide) -->
     <GameObject type="platform">
-        <BodyComponent x="2200" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
+        <BodyComponent x="2200" y="500" width="200" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="3" tileY="3" tileWidth="16" tileHeight="16" />
         <SolidComponent />
     </GameObject>
 
-    <!-- ... continue with 11 more tiles for platform 4 (2200 to 2392) ... -->
-
-    <!-- Platform 5 - 62 tiles wide (1000 pixels) -->
+    <!-- Platform 5 - Single stretched platform (1000px wide) -->
     <GameObject type="platform">
-        <BodyComponent x="2600" y="500" width="16" height="16" />
-        <SpriteComponent textureKey="tile_texture" tileX="0" tileY="0" tileWidth="16" tileHeight="16" />
+        <BodyComponent x="2600" y="500" width="1000" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="3" tileY="3" tileWidth="16" tileHeight="16" />
         <SolidComponent />
     </GameObject>
-
-    <!-- ... continue with 61 more tiles for platform 5 (2600 to 3592) ... -->
 
     <!-- Patrolling Enemy -->
     <GameObject type="enemy">

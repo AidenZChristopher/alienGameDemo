@@ -42,7 +42,57 @@ public:
     float worldToScreenX(float worldX) const { return worldX - x; }
     float worldToScreenY(float worldY) const { return worldY - y; }
 };
-
+// ========================
+// View Class
+// ========================
+class View {
+    public:
+        View(float centerX = 0, float centerY = 0, float scale = 1.0f, float angle = 0.0f)
+            : m_centerX(centerX), m_centerY(centerY), m_scale(scale), m_angle(angle) {}
+        
+        void setCenter(float x, float y) { m_centerX = x; m_centerY = y; }
+        void setScale(float scale) { m_scale = scale; }
+        void setAngle(float angle) { m_angle = angle; }
+        
+        // Transform world coordinates to screen coordinates
+        float worldToScreenX(float worldX) const { 
+            return (worldX - m_centerX) * m_scale + m_screenWidth / 2; 
+        }
+        float worldToScreenY(float worldY) const { 
+            return (worldY - m_centerY) * m_scale + m_screenHeight / 2; 
+        }
+        
+        // Transform screen coordinates to world coordinates  
+        float screenToWorldX(float screenX) const { 
+            return (screenX - m_screenWidth / 2) / m_scale + m_centerX; 
+        }
+        float screenToWorldY(float screenY) const { 
+            return (screenY - m_screenHeight / 2) / m_scale + m_centerY; 
+        }
+        
+        // Set screen dimensions for proper transformation
+        void setScreenDimensions(int width, int height) { 
+            m_screenWidth = width; 
+            m_screenHeight = height; 
+        }
+        
+        // Get transformed rectangle for rendering
+        SDL_Rect getTransformedRect(float worldX, float worldY, float width, float height) const {
+            return {
+                static_cast<int>(worldToScreenX(worldX)),
+                static_cast<int>(worldToScreenY(worldY)),
+                static_cast<int>(width * m_scale),
+                static_cast<int>(height * m_scale)
+            };
+        }
+        
+    private:
+        float m_centerX, m_centerY;
+        float m_scale = 1.0f;
+        float m_angle = 0.0f;
+        int m_screenWidth = 800;
+        int m_screenHeight = 600;
+    };
 // ========================
 // Input System
 // ========================
@@ -140,7 +190,84 @@ private:
     TextureManager() = default;
     std::unordered_map<std::string, SDL_Texture*> m_textures;
 };
-
+class Engine {
+    public:
+        static Engine& getInstance() {
+            static Engine instance;
+            return instance;
+        }
+        
+        bool initialize(const std::string& title, int width, int height) {
+            // SDL initialization
+            if(SDL_Init(SDL_INIT_VIDEO) < 0) {
+                std::cerr << "SDL initialization failed: " << SDL_GetError() << std::endl;
+                return false;
+            }
+            
+            m_window = SDL_CreateWindow(title.c_str(), 
+                                       SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
+                                       width, height, 0);
+            if(!m_window) {
+                std::cerr << "Window creation failed: " << SDL_GetError() << std::endl;
+                return false;
+            }
+            
+            m_renderer = SDL_CreateRenderer(m_window, -1, SDL_RENDERER_ACCELERATED);
+            if(!m_renderer) {
+                std::cerr << "Renderer creation failed: " << SDL_GetError() << std::endl;
+                return false;
+            }
+            
+            m_mainView.setScreenDimensions(width, height);
+            std::cout << "Engine initialized: " << width << "x" << height << std::endl;
+            return true;
+        }
+        
+        void setTargetFPS(int fps) { 
+            m_targetFPS = fps; 
+            m_frameDelay = 1000.0f / fps;
+        }
+        
+        void beginFrame() {
+            m_frameStart = SDL_GetTicks();
+        }
+        
+        void endFrame() {
+            m_frameTime = SDL_GetTicks() - m_frameStart;
+            
+            // Frame rate limiting
+            if(m_frameDelay > m_frameTime) {
+                SDL_Delay(m_frameDelay - m_frameTime);
+            }
+            
+            // Update deltaTime (in seconds)
+            m_deltaTime = (SDL_GetTicks() - m_frameStart) / 1000.0f;
+        }
+        
+        void shutdown() {
+            if(m_renderer) SDL_DestroyRenderer(m_renderer);
+            if(m_window) SDL_DestroyWindow(m_window);
+            SDL_Quit();
+        }
+        
+        // Getters
+        static float deltaTime() { return getInstance().m_deltaTime; }
+        static View& getMainView() { return getInstance().m_mainView; }
+        static SDL_Renderer* getRenderer() { return getInstance().m_renderer; }
+        static SDL_Window* getWindow() { return getInstance().m_window; }
+        
+    private:
+        Engine() = default;
+        SDL_Window* m_window = nullptr;
+        SDL_Renderer* m_renderer = nullptr;
+        View m_mainView;
+        int m_targetFPS = 60;
+        float m_frameDelay = 16.67f;
+        Uint32 m_frameStart = 0;
+        float m_frameTime = 0;
+        float m_deltaTime = 0.016f;
+    };
+    
 // ========================
 // Base Component
 // ========================
@@ -148,8 +275,7 @@ class Component {
 public:
     virtual ~Component() = default;
     virtual void update(float dt) = 0;
-    virtual void draw(SDL_Renderer* r, const Camera& camera) = 0;
-    
+    virtual void draw(SDL_Renderer* r, const View& view) = 0;    
     GameObject& parent() { return *m_parent; }
     void setParent(GameObject* p) { m_parent = p; }
     
@@ -161,43 +287,43 @@ protected:
 // GameObject
 // ========================
 class GameObject {
-public:
-    template<typename T, typename... Args>
-    T* add(Args&&... args) {
-        auto comp = std::make_unique<T>(std::forward<Args>(args)...);
-        comp->setParent(this);
-        T* ptr = comp.get();
-        components.emplace_back(std::move(comp));
-        return ptr;
-    }
-
-    template<typename T>
-    T* get() {
-        for(auto& c : components) {
-            if(auto ptr = dynamic_cast<T*>(c.get())) {
-                return ptr;
+    public:
+        template<typename T, typename... Args>
+        T* add(Args&&... args) {
+            auto comp = std::make_unique<T>(std::forward<Args>(args)...);
+            comp->setParent(this);
+            T* ptr = comp.get();
+            components.emplace_back(std::move(comp));
+            return ptr;
+        }
+    
+        template<typename T>
+        T* get() {
+            for(auto& c : components) {
+                if(auto ptr = dynamic_cast<T*>(c.get())) {
+                    return ptr;
+                }
+            }
+            return nullptr;
+        }
+    
+        void update(float dt) {
+            for(auto& c : components) {
+                c->update(dt);
             }
         }
-        return nullptr;
-    }
-
-    void update(float dt) {
-        for(auto& c : components) {
-            c->update(dt);
+    
+        void draw(SDL_Renderer* renderer, const View& view) {
+            for(auto& c : components) {
+                c->draw(renderer, view);
+            }
         }
-    }
-
-    void draw(SDL_Renderer* renderer, const Camera& camera) {
-        for(auto& c : components) {
-            c->draw(renderer, camera);
-        }
-    }
-
-    bool isActive = true;
-
-private:
-    std::vector<std::unique_ptr<Component>> components;
-};
+    
+        bool isActive = true;
+    
+    private:
+        std::vector<std::unique_ptr<Component>> components;
+    };
 
 // ========================
 // Required Components
@@ -222,7 +348,7 @@ class TilingBackgroundComponent : public Component {
             if (m_scrollOffsetY <= -m_textureHeight) m_scrollOffsetY += m_textureHeight;
         }
         
-        void draw(SDL_Renderer* renderer, const Camera& camera) override {
+        void draw(SDL_Renderer* renderer, const View& view) override {  // ADD 'override' here
             if (!m_texture) {
                 m_texture = TextureManager::getInstance().getTexture(m_textureKey);
                 if (!m_texture) {
@@ -305,8 +431,8 @@ public:
         y += velocityY * dt;
     }
     
-    void draw(SDL_Renderer* renderer, const Camera& camera) override {}
-    
+    void draw(SDL_Renderer* renderer, const View& view) override {}
+
     float getVelocityX() const { return x - prevX; }
     float getVelocityY() const { return y - prevY; }
 };
@@ -323,8 +449,7 @@ public:
         body->y += body->velocityY * dt;
     }
     
-    void draw(SDL_Renderer* renderer, const Camera& camera) override {}
-    
+void draw(SDL_Renderer* renderer, const View& view) override {}    
 private:
     float gravity = 800.0f;
 };
@@ -333,8 +458,7 @@ private:
 class SolidComponent : public Component {
 public:
     void update(float dt) override {}
-    void draw(SDL_Renderer* renderer, const Camera& camera) override {}
-    
+    void draw(SDL_Renderer* renderer, const View& view) override {}    
     bool isSolid = true;
 };
 
@@ -342,11 +466,11 @@ public:
 class EnemyComponent : public Component {
 public:
     void update(float dt) override {}
-    void draw(SDL_Renderer* renderer, const Camera& camera) override {}
-    
+    void draw(SDL_Renderer* renderer, const View& view) override {}    
     bool isEnemy = true;
 };
 
+// SpriteComponent with texture and sprite sheet support
 // SpriteComponent with texture and sprite sheet support
 class SpriteComponent : public Component {
     public:
@@ -364,16 +488,11 @@ class SpriteComponent : public Component {
             }
         }
         
-        void draw(SDL_Renderer* renderer, const Camera& camera) override {
+        void draw(SDL_Renderer* renderer, const View& view) override {
             auto body = parent().get<BodyComponent>();
             if(!body) return;
             
-            SDL_Rect destRect = {
-                static_cast<int>(camera.worldToScreenX(body->x)),
-                static_cast<int>(camera.worldToScreenY(body->y)),
-                static_cast<int>(body->width),
-                static_cast<int>(body->height)
-            };
+            SDL_Rect destRect = view.getTransformedRect(body->x, body->y, body->width, body->height);
             
             // If we have a texture, use it
             if(m_texture) {
@@ -576,10 +695,10 @@ public:
         body->velocityX = 0;
         
         if(input.isKeyPressed(SDL_SCANCODE_A) || input.isKeyPressed(SDL_SCANCODE_LEFT)) {
-            body->velocityX = -speed;
+            body->velocityX = -speed;  // Multiply by deltaTime
         }
         if(input.isKeyPressed(SDL_SCANCODE_D) || input.isKeyPressed(SDL_SCANCODE_RIGHT)) {
-            body->velocityX = speed;
+            body->velocityX = speed;   // Multiply by deltaTime
         }
         if((input.isKeyJustPressed(SDL_SCANCODE_SPACE) || input.isKeyJustPressed(SDL_SCANCODE_UP)) && (m_grounded || m_onPlatform)) {
             body->velocityY = -jumpForce;
@@ -624,8 +743,7 @@ public:
         }
     }
     
-    void draw(SDL_Renderer* renderer, const Camera& camera) override {}
-    
+    void draw(SDL_Renderer* renderer, const View& view) override {}    
     // Public methods to be called by Game class
     void setOnPlatform(bool onPlatform, GameObject* platform = nullptr) { 
         m_onPlatform = onPlatform; 
@@ -683,9 +801,9 @@ public:
         // Store previous position for velocity calculation
         body->prevX = body->x;
         
-        // Only handle horizontal movement
-        body->velocityX = movingRight ? speed : -speed;
-        body->x += body->velocityX * dt;
+        // Only handle horizontal movement 
+        float movement = movingRight ? speed * dt : -speed * dt;
+        body->x += movement;
         
         if(body->x >= rightBound - body->width) movingRight = false;
         if(body->x <= leftBound) movingRight = true;
@@ -694,8 +812,8 @@ public:
         body->velocityX = (body->x - body->prevX) / dt;
     }
     
-    void draw(SDL_Renderer* renderer, const Camera& camera) override {}
-    
+    void draw(SDL_Renderer* renderer, const View& view) override {}
+
     float leftBound, rightBound, speed;
     bool movingRight = true;
 };
@@ -721,8 +839,7 @@ public:
         body->velocityY = (body->y - body->prevY) / dt;
     }
     
-    void draw(SDL_Renderer* renderer, const Camera& camera) override {}
-    
+    void draw(SDL_Renderer* renderer, const View& view) override {}    
     float amplitude, frequency;
     float baseY = 0;
     float time = 0;
@@ -753,8 +870,8 @@ public:
         body->velocityX = (body->x - body->prevX) / dt;
     }
     
-    void draw(SDL_Renderer* renderer, const Camera& camera) override {}
-    
+    void draw(SDL_Renderer* renderer, const View& view) override {}
+
     float leftBound, rightBound, speed;
     bool movingRight = true;
 };
@@ -805,7 +922,10 @@ class XMLParser {
             line.erase(line.find_last_not_of(" \t\r\n") + 1);
             
             if (line.empty()) continue;
-            
+
+            if (line.find("<Level>") != std::string::npos || line.find("</Level>") != std::string::npos) {
+                continue;
+            }
             completeTag += " " + line;
             
             // Check if the tag is now complete
@@ -1139,241 +1259,327 @@ private:
 // Game Class
 // ========================
 class Game {
-public:
-    bool initialize() {
-        if(SDL_Init(SDL_INIT_VIDEO) < 0) {
-            std::cerr << "SDL initialization failed: " << SDL_GetError() << std::endl;
-            return false;
-        }
-        
-        m_window = SDL_CreateWindow("Component-Based Platformer with Sprite Sheets", 
-                                   SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
-                                   800, 600, 0);
-        if(!m_window) {
-            std::cerr << "Window creation failed: " << SDL_GetError() << std::endl;
-            return false;
-        }
-        
-        m_renderer = SDL_CreateRenderer(m_window, -1, SDL_RENDERER_ACCELERATED);
-        if(!m_renderer) {
-            std::cerr << "Renderer creation failed: " << SDL_GetError() << std::endl;
-            return false;
-        }
-        m_gameObjects.clear();
-        TextureManager::getInstance().cleanup();
-        
-        std::cout << "=== LOADING NEW LEVEL ===" << std::endl;
-        // Load game objects from XML with texture support
-        m_gameObjects = XMLComponentFactory::createFromXML(m_renderer, "scene.xml");
-        debugLoadedObjects();
-        return true;
-    }
-    
-    void run() {
-        Uint32 lastTime = SDL_GetTicks();
-        bool running = true;
-        SDL_Event event;
-        
-        while(running) {
-            while(SDL_PollEvent(&event)) {
-                if(event.type == SDL_QUIT) {
-                    running = false;
-                }
+    public:
+        bool initialize() {
+            // Use Engine for initialization
+            if(!Engine::getInstance().initialize("Component-Based Platformer with Sprite Sheets", 800, 600)) {
+                return false;
             }
             
-            Uint32 currentTime = SDL_GetTicks();
-            float deltaTime = (currentTime - lastTime) / 1000.0f;
-            lastTime = currentTime;
+            Engine::getInstance().setTargetFPS(60);
             
-            InputSystem::getInstance().update();
+            // FORCE COMPLETE CLEANUP - Add these lines
+            m_gameObjects.clear();
+            TextureManager::getInstance().cleanup();
             
+            std::cout << "=== LOADING NEW LEVEL ===" << std::endl;
+            
+            // Test if XML file exists
+            std::ifstream testFile("scene.xml");
+            if (!testFile.is_open()) {
+                std::cerr << "ERROR: Cannot open scene.xml! Make sure it's in the same directory as the executable." << std::endl;
+                return false;
+            }
+            testFile.close();
+            // Load game objects from XML
+            m_gameObjects = XMLComponentFactory::createFromXML(Engine::getRenderer(), "scene.xml");
+            
+            if (m_gameObjects.empty()) {
+                std::cerr << "ERROR: No game objects loaded from XML!" << std::endl;
+                return false;
+            }
+            
+            debugLoadedObjects();
+            std::cout << "=== GAME INITIALIZATION COMPLETE ===" << std::endl;
+            return true;
+        }
+        
+        void run() {
+            Uint32 lastTime = SDL_GetTicks();
+            bool running = true;
+            SDL_Event event;
+            
+            std::cout << "=== GAME LOOP STARTED ===" << std::endl;
+            
+            while(running) {
+                // Engine frame management
+                Engine::getInstance().beginFrame();
+                
+                // Input handling
+                while(SDL_PollEvent(&event)) {
+                    if(event.type == SDL_QUIT) {
+                        running = false;
+                    }
+                    // You can add more event handling here if needed
+                }
+                
+                InputSystem::getInstance().update();
+                
+                // Update using engine's deltaTime
+                update(Engine::deltaTime());
+                
+                // Render
+                render();
+                
+                Engine::getInstance().endFrame();
+            }
+            
+            std::cout << "=== GAME LOOP ENDED ===" << std::endl;
+        }
+        
+        void shutdown() {
+            std::cout << "=== SHUTTING DOWN GAME ===" << std::endl;
+            m_gameObjects.clear();
+            TextureManager::getInstance().cleanup();
+            Engine::getInstance().shutdown();
+        }
+        
+    private:
+        void update(float deltaTime) {
+            // Update all game objects using proper deltaTime
             for(auto& obj : m_gameObjects) {
                 if(obj->isActive) {
                     obj->update(deltaTime);
                 }
             }
             
-            // Check collisions after all objects have updated
+            updateCamera();
             checkCollisions();
             
-            // Update camera to follow player
-            updateCamera();
+            // Optional: Debug FPS display
+            static int frameCount = 0;
+            static float timeAccumulator = 0.0f;
+            timeAccumulator += deltaTime;
+            frameCount++;
             
-            // Render with proper background handling
-            render();
-            
-            SDL_Delay(16);
+            if(timeAccumulator >= 1.0f) {
+                std::cout << "FPS: " << frameCount << ", DeltaTime: " << deltaTime << std::endl;
+                frameCount = 0;
+                timeAccumulator = 0.0f;
+            }
         }
-    }
-    
-    void shutdown() {
-        // Clean up textures
-        TextureManager::getInstance().cleanup();
         
-        SDL_DestroyRenderer(m_renderer);
-        SDL_DestroyWindow(m_window);
-        SDL_Quit();
-    }
-    
-private:
-    void debugLoadedObjects() {
-        std::cout << "=== LOADED OBJECTS DEBUG ===" << std::endl;
-        int platformCount = 0;
-        int movingPlatformCount = 0;
-        int totalObjects = 0;
-        
-        for(auto& obj : m_gameObjects) {
-            totalObjects++;
-            if(obj->get<SolidComponent>()) {
-                platformCount++;
-                auto body = obj->get<BodyComponent>();
-                if(body) {
-                    std::cout << "Platform at: " << body->x << "," << body->y 
-                            << " size: " << body->width << "x" << body->height << std::endl;
+        void render() {
+            SDL_Renderer* renderer = Engine::getRenderer();
+            
+            // Clear screen
+            SDL_SetRenderDrawColor(renderer, 135, 206, 235, 255); // Sky blue background
+            SDL_RenderClear(renderer);
+            
+            // Get the main view from Engine
+            View& mainView = Engine::getMainView();
+            
+            // Render backgrounds first
+            for(auto& obj : m_gameObjects) {
+                if(obj->isActive && obj->get<TilingBackgroundComponent>()) {
+                    obj->draw(renderer, mainView);
                 }
             }
-            if(obj->get<HorizontalMoveBehaviorComponent>()) {
-                movingPlatformCount++;
-            }
-        }
-        
-        std::cout << "Total objects: " << totalObjects << std::endl;
-        std::cout << "Platforms: " << platformCount << std::endl;
-        std::cout << "Moving platforms: " << movingPlatformCount << std::endl;
-        std::cout << "=============================" << std::endl;
-    }
-
-    void updateCamera() {
-        auto playerObj = findPlayer();
-        if (!playerObj) return;
-        
-        auto playerBody = playerObj->get<BodyComponent>();
-        if(playerBody) {
-            // Follow player's center
-            float playerCenterX = playerBody->x + playerBody->width / 2;
-            float playerCenterY = playerBody->y + playerBody->height / 2;
-            m_camera.follow(playerCenterX, playerCenterY, 800, 600);
-        }
-    }
-    
-    GameObject* findPlayer() {
-        for(auto& obj : m_gameObjects) {
-            if(obj->get<ControllerComponent>()) { // Player has controller
-                return obj.get();
-            }
-        }
-        return nullptr;
-    }
-    
-    void render() {
-        // Clear the screen
-        SDL_SetRenderDrawColor(m_renderer, 40, 40, 40, 255);
-        SDL_RenderClear(m_renderer);
-        
-        // Render backgrounds first (all objects with TilingBackgroundComponent)
-        for(auto& obj : m_gameObjects) {
-            if(obj->isActive && obj->get<TilingBackgroundComponent>()) {
-                obj->draw(m_renderer, m_camera);
-            }
-        }
-        
-        // Then render all other game objects (platforms, player, enemies, etc.)
-        for(auto& obj : m_gameObjects) {
-            if(obj->isActive && !obj->get<TilingBackgroundComponent>()) {
-                obj->draw(m_renderer, m_camera);
-            }
-        }
-        
-        SDL_RenderPresent(m_renderer);
-    }
-    
-    void checkCollisions() {
-        auto playerObj = findPlayer();
-        if (!playerObj) return;
-        
-        auto playerBody = playerObj->get<BodyComponent>();
-        auto playerController = playerObj->get<ControllerComponent>();
-        
-        if(!playerBody || !playerController || playerController->isDead()) return;
-        
-        // Reset platform status
-        playerController->setOnPlatform(false, nullptr);
-        
-        // Check collisions with all other objects
-        for(size_t i = 0; i < m_gameObjects.size(); ++i) {
-            auto otherObj = m_gameObjects[i].get();
             
-            // Skip the player object itself and background objects
-            if(otherObj == playerObj || otherObj->get<TilingBackgroundComponent>()) {
-                continue;
+            // Then render all other game objects
+            for(auto& obj : m_gameObjects) {
+                if(obj->isActive && !obj->get<TilingBackgroundComponent>()) {
+                    obj->draw(renderer, mainView);
+                }
             }
             
-            auto otherBody = otherObj->get<BodyComponent>();
-            auto otherSolid = otherObj->get<SolidComponent>();
-            auto otherEnemy = otherObj->get<EnemyComponent>();
+            // Optional: Render debug information
+            renderDebugInfo(renderer);
             
-            if(!otherBody) continue;
+            SDL_RenderPresent(renderer);
+        }
+        
+        void updateCamera() {
+            auto playerObj = findPlayer();
+            if (!playerObj) {
+                // Debug: No player found
+                static bool warned = false;
+                if (!warned) {
+                    std::cout << "WARNING: No player object found for camera tracking!" << std::endl;
+                    warned = true;
+                }
+                return;
+            }
             
-            // Check player collisions
-            if(CollisionSystem::checkCollision(playerBody, otherBody)) {
-                // Check if it's an enemy - if so, player dies and respawns
-                if(otherEnemy) {
-                    playerController->die();
-                    return; // Stop checking other collisions
+            auto playerBody = playerObj->get<BodyComponent>();
+            if(playerBody) {
+                // Update engine's main view to follow player
+                View& mainView = Engine::getMainView();
+                mainView.setCenter(
+                    playerBody->x + playerBody->width / 2,
+                    playerBody->y + playerBody->height / 2
+                );
+                
+                // Optional: Add camera smoothing or bounds checking here
+            }
+        }
+        
+        GameObject* findPlayer() {
+            for(auto& obj : m_gameObjects) {
+                if(obj->get<ControllerComponent>()) {
+                    return obj.get();
+                }
+            }
+            return nullptr;
+        }
+        
+        void checkCollisions() {
+            auto playerObj = findPlayer();
+            if (!playerObj) return;
+            
+            auto playerBody = playerObj->get<BodyComponent>();
+            auto playerController = playerObj->get<ControllerComponent>();
+            
+            if(!playerBody || !playerController || playerController->isDead()) return;
+            
+            // Reset platform status
+            playerController->setOnPlatform(false, nullptr);
+            
+            // Check collisions with all other objects
+            for(size_t i = 0; i < m_gameObjects.size(); ++i) {
+                auto otherObj = m_gameObjects[i].get();
+                
+                // Skip the player object itself and background objects
+                if(otherObj == playerObj || otherObj->get<TilingBackgroundComponent>()) {
+                    continue;
                 }
                 
-                // Check if it's a solid object for platform collision
-                if(otherSolid) {
-                    float platformVelocityX = otherBody->getVelocityX();
-                    bool landedOnPlatform = CollisionSystem::resolvePlatformCollision(playerBody, otherBody, platformVelocityX);
-                    if(landedOnPlatform) {
-                        playerController->setOnPlatform(true, otherObj);
+                auto otherBody = otherObj->get<BodyComponent>();
+                auto otherSolid = otherObj->get<SolidComponent>();
+                auto otherEnemy = otherObj->get<EnemyComponent>();
+                
+                if(!otherBody) continue;
+                
+                // Check player collisions
+                if(CollisionSystem::checkCollision(playerBody, otherBody)) {
+                    // Check if it's an enemy - if so, player dies and respawns
+                    if(otherEnemy) {
+                        std::cout << "Player died by enemy collision!" << std::endl;
+                        playerController->die();
+                        return; // Stop checking other collisions
+                    }
+                    
+                    // Check if it's a solid object for platform collision
+                    if(otherSolid) {
+                        float platformVelocityX = otherBody->getVelocityX();
+                        bool landedOnPlatform = CollisionSystem::resolvePlatformCollision(playerBody, otherBody, platformVelocityX);
+                        if(landedOnPlatform) {
+                            playerController->setOnPlatform(true, otherObj);
+                        }
                     }
                 }
-            }
-            
-            // Handle enemy physics with platforms
-            if(otherEnemy) {
-                auto enemyBody = otherBody;
-                auto enemyPhysics = otherObj->get<PhysicsComponent>();
                 
-                // Only check collisions for enemies that have physics (gravity)
-                if(enemyPhysics) {
-                    for(size_t j = 0; j < m_gameObjects.size(); ++j) {
-                        // Don't check collision with self or background
-                        if(i == j || m_gameObjects[j].get()->get<TilingBackgroundComponent>()) {
-                            continue;
-                        }
-                        
-                        auto groundObj = m_gameObjects[j].get();
-                        auto groundBody = groundObj->get<BodyComponent>();
-                        auto groundSolid = groundObj->get<SolidComponent>();
-                        
-                        if(!groundBody || !groundSolid) continue;
-                        
-                        // Check if enemy is colliding with solid ground
-                        if(CollisionSystem::checkCollision(enemyBody, groundBody)) {
-                            // Simple ground collision resolution for enemies
-                            float overlapTop = (enemyBody->y + enemyBody->height) - groundBody->y;
-                            float overlapBottom = (groundBody->y + groundBody->height) - enemyBody->y;
+                // Handle enemy physics with platforms
+                if(otherEnemy) {
+                    auto enemyBody = otherBody;
+                    auto enemyPhysics = otherObj->get<PhysicsComponent>();
+                    
+                    // Only check collisions for enemies that have physics (gravity)
+                    if(enemyPhysics) {
+                        for(size_t j = 0; j < m_gameObjects.size(); ++j) {
+                            // Don't check collision with self or background
+                            if(i == j || m_gameObjects[j].get()->get<TilingBackgroundComponent>()) {
+                                continue;
+                            }
                             
-                            // If enemy is above the ground (landing on it)
-                            if(std::abs(overlapTop) < std::abs(overlapBottom)) {
-                                enemyBody->y = groundBody->y - enemyBody->height;
-                                enemyBody->velocityY = 0;
+                            auto groundObj = m_gameObjects[j].get();
+                            auto groundBody = groundObj->get<BodyComponent>();
+                            auto groundSolid = groundObj->get<SolidComponent>();
+                            
+                            if(!groundBody || !groundSolid) continue;
+                            
+                            // Check if enemy is colliding with solid ground
+                            if(CollisionSystem::checkCollision(enemyBody, groundBody)) {
+                                // Simple ground collision resolution for enemies
+                                float overlapTop = (enemyBody->y + enemyBody->height) - groundBody->y;
+                                float overlapBottom = (groundBody->y + groundBody->height) - enemyBody->y;
+                                
+                                // If enemy is above the ground (landing on it)
+                                if(std::abs(overlapTop) < std::abs(overlapBottom)) {
+                                    enemyBody->y = groundBody->y - enemyBody->height;
+                                    enemyBody->velocityY = 0;
+                                }
                             }
                         }
                     }
                 }
             }
         }
-    }
-    
-    SDL_Window* m_window = nullptr;
-    SDL_Renderer* m_renderer = nullptr;
-    std::vector<std::unique_ptr<GameObject>> m_gameObjects;
-    Camera m_camera;
-};
+        
+        void debugLoadedObjects() {
+            std::cout << "=== LOADED OBJECTS DEBUG ===" << std::endl;
+            int platformCount = 0;
+            int movingPlatformCount = 0;
+            int enemyCount = 0;
+            int playerCount = 0;
+            int backgroundCount = 0;
+            int totalObjects = 0;
+            
+            for(auto& obj : m_gameObjects) {
+                totalObjects++;
+                
+                if(obj->get<SolidComponent>()) {
+                    platformCount++;
+                    if(obj->get<HorizontalMoveBehaviorComponent>()) {
+                        movingPlatformCount++;
+                    }
+                }
+                if(obj->get<EnemyComponent>()) {
+                    enemyCount++;
+                }
+                if(obj->get<ControllerComponent>()) {
+                    playerCount++;
+                }
+                if(obj->get<TilingBackgroundComponent>()) {
+                    backgroundCount++;
+                }
+            }
+            
+            std::cout << "Total GameObjects: " << totalObjects << std::endl;
+            std::cout << "Players: " << playerCount << std::endl;
+            std::cout << "Platforms: " << platformCount << " (moving: " << movingPlatformCount << ")" << std::endl;
+            std::cout << "Enemies: " << enemyCount << std::endl;
+            std::cout << "Backgrounds: " << backgroundCount << std::endl;
+            
+            // Log positions of first few platforms for verification
+            int loggedPlatforms = 0;
+            for(auto& obj : m_gameObjects) {
+                if(obj->get<SolidComponent>() && loggedPlatforms < 5) {
+                    auto body = obj->get<BodyComponent>();
+                    if(body) {
+                        std::cout << "Platform " << (loggedPlatforms + 1) << " at: " 
+                                  << body->x << "," << body->y << " size: " 
+                                  << body->width << "x" << body->height << std::endl;
+                        loggedPlatforms++;
+                    }
+                }
+            }
+            std::cout << "=============================" << std::endl;
+        }
+        
+        void renderDebugInfo(SDL_Renderer* renderer) {
+            // Optional: Add debug rendering here
+            // For example: player position, FPS counter, collision boxes, etc.
+            
+            auto playerObj = findPlayer();
+            if (playerObj) {
+                auto playerBody = playerObj->get<BodyComponent>();
+                if (playerBody) {
+                    // Draw player collision box in debug mode
+                    View& mainView = Engine::getMainView();
+                    SDL_Rect debugRect = mainView.getTransformedRect(
+                        playerBody->x, playerBody->y, 
+                        playerBody->width, playerBody->height
+                    );
+                    
+                    SDL_SetRenderDrawColor(renderer, 255, 0, 0, 128); // Semi-transparent red
+                    SDL_RenderDrawRect(renderer, &debugRect);
+                }
+            }
+        }
+        
+        std::vector<std::unique_ptr<GameObject>> m_gameObjects;
+    };
 
 // ========================
 // Main
