@@ -194,7 +194,91 @@ private:
 // ========================
 // Required Components
 // ========================
-
+// ========================
+// Tiling Background Component
+// ========================
+class TilingBackgroundComponent : public Component {
+    public:
+        TilingBackgroundComponent(const std::string& textureKey, float scrollSpeedX = 0.0f, float scrollSpeedY = 0.0f) 
+            : m_textureKey(textureKey), m_scrollSpeedX(scrollSpeedX), m_scrollSpeedY(scrollSpeedY), m_texture(nullptr) {}
+        
+        void update(float dt) override {
+            // Update scroll offsets for animated backgrounds
+            m_scrollOffsetX += m_scrollSpeedX * dt;
+            m_scrollOffsetY += m_scrollSpeedY * dt;
+            
+            // Wrap offsets to prevent overflow
+            if (m_scrollOffsetX >= m_textureWidth) m_scrollOffsetX -= m_textureWidth;
+            if (m_scrollOffsetX <= -m_textureWidth) m_scrollOffsetX += m_textureWidth;
+            if (m_scrollOffsetY >= m_textureHeight) m_scrollOffsetY -= m_textureHeight;
+            if (m_scrollOffsetY <= -m_textureHeight) m_scrollOffsetY += m_textureHeight;
+        }
+        
+        void draw(SDL_Renderer* renderer, const Camera& camera) override {
+            if (!m_texture) {
+                m_texture = TextureManager::getInstance().getTexture(m_textureKey);
+                if (!m_texture) {
+                    SDL_SetRenderDrawColor(renderer, 135, 206, 235, 255);
+                    SDL_RenderClear(renderer);
+                    return;
+                }
+                
+                // Automatically get the actual texture dimensions
+                SDL_QueryTexture(m_texture, NULL, NULL, &m_textureWidth, &m_textureHeight);
+                
+                std::cout << "Tiling background loaded: " << m_textureKey 
+                          << " (" << m_textureWidth << "x" << m_textureHeight << ")" << std::endl;
+            }
+            
+            // Get screen dimensions
+            int screenWidth, screenHeight;
+            SDL_GetRendererOutputSize(renderer, &screenWidth, &screenHeight);
+            
+            // Calculate starting positions for tiling
+            int startX = static_cast<int>(-m_scrollOffsetX);
+            int startY = static_cast<int>(-m_scrollOffsetY);
+            
+            // Ensure we cover the entire screen with some margin
+            int tilesX = (screenWidth / m_textureWidth) + 2;
+            int tilesY = (screenHeight / m_textureHeight) + 2;
+            
+            // Draw tiled background
+            for (int y = 0; y < tilesY; y++) {
+                for (int x = 0; x < tilesX; x++) {
+                    SDL_Rect destRect = {
+                        startX + (x * m_textureWidth),
+                        startY + (y * m_textureHeight),
+                        m_textureWidth,
+                        m_textureHeight
+                    };
+                    SDL_RenderCopy(renderer, m_texture, NULL, &destRect);
+                }
+            }
+            
+            // Debug info (optional)
+            static int debugCounter = 0;
+            if (debugCounter++ % 300 == 0) {
+                std::cout << "Drawing tiling background: " << tilesX << "x" << tilesY << " tiles" 
+                          << " at offset (" << m_scrollOffsetX << "," << m_scrollOffsetY << ")" << std::endl;
+            }
+        }
+        
+        // Method to change scroll speed dynamically
+        void setScrollSpeed(float speedX, float speedY) {
+            m_scrollSpeedX = speedX;
+            m_scrollSpeedY = speedY;
+        }
+        
+    private:
+        std::string m_textureKey;
+        SDL_Texture* m_texture;
+        float m_scrollSpeedX;
+        float m_scrollSpeedY;
+        float m_scrollOffsetX = 0.0f;
+        float m_scrollOffsetY = 0.0f;
+        int m_textureWidth = 0;
+        int m_textureHeight = 0;
+    };
 // BodyComponent
 class BodyComponent : public Component {
 public:
@@ -257,26 +341,17 @@ public:
 
 // SpriteComponent with texture and sprite sheet support
 class SpriteComponent : public Component {
-public:
-    SpriteComponent(const std::string& textureKey = "", SDL_Color color = {255, 255, 255, 255}) 
-        : m_textureKey(textureKey), m_color(color), m_texture(nullptr) {}
-    
+    public:
+        SpriteComponent(const std::string& textureKey = "", SDL_Color color = {255, 255, 255, 255}) 
+            : m_textureKey(textureKey), m_color(color), m_texture(nullptr) {}
+        
         void update(float dt) override {
             // Update animation frame if needed
             if(m_animated) {
                 m_animationTimer += dt;
                 if(m_animationTimer >= m_frameDuration) {
                     m_animationTimer = 0;
-                    int oldFrame = m_currentFrame;
                     m_currentFrame = (m_currentFrame + 1) % m_totalFrames;
-                    
-                    // Debug: Print animation progress occasionally
-                    static int debugCounter = 0;
-                    if (debugCounter++ % 60 == 0) {
-                        std::cout << "Animation - Frame: " << m_currentFrame << "/" << m_totalFrames 
-                                  << ", Animated: " << m_animated 
-                                  << ", Using Sprite Sheet: " << m_usingSpriteSheet << std::endl;
-                    }
                 }
             }
         }
@@ -292,24 +367,15 @@ public:
                 static_cast<int>(body->height)
             };
             
-            // Debug: Print draw info occasionally
-            static int drawDebugCounter = 0;
-            if (drawDebugCounter++ % 120 == 0) {
-                std::cout << "=== DRAW DEBUG ===" << std::endl;
-                std::cout << "Texture: " << (m_texture ? "LOADED" : "NULL") << std::endl;
-                std::cout << "Using Sprite Sheet: " << m_usingSpriteSheet << std::endl;
-                std::cout << "Animated: " << m_animated << std::endl;
-                std::cout << "Current Frame: " << m_currentFrame << std::endl;
-                std::cout << "Total Frames: " << m_totalFrames << std::endl;
-                std::cout << "Frame Size: " << m_spriteWidth << "x" << m_spriteHeight << std::endl;
-            }
-            
-            // If we have a texture, use it (stretched to fit the body)
+            // If we have a texture, use it
             if(m_texture) {
-                // For platforms: stretch the texture to fit the platform width
-                // For sprites with animation: use sprite sheet logic
-                if(m_usingSpriteSheet) {
-                    // Calculate row and column for multi-row sprite sheets
+                // For custom source rectangle (specific tile coordinates)
+                if(m_usingCustomSource) {
+                    SDL_RenderCopy(renderer, m_texture, &m_customSrcRect, &destRect);
+                }
+                // For sprite sheets with static frames (platforms)
+                else if(m_usingSpriteSheet && !m_animated) {
+                    // Calculate row and column for the static frame
                     int row = m_currentFrame / m_framesPerRow;
                     int col = m_currentFrame % m_framesPerRow;
                     
@@ -319,16 +385,23 @@ public:
                         m_spriteWidth,
                         m_spriteHeight
                     };
-                    
-                    // Debug source rectangle
-                    if (drawDebugCounter % 120 == 0) {
-                        std::cout << "Source Rect: " << srcRect.x << "," << srcRect.y 
-                                  << " " << srcRect.w << "x" << srcRect.h << std::endl;
-                    }
-                    
                     SDL_RenderCopy(renderer, m_texture, &srcRect, &destRect);
-                } else {
-                    // For static textures (like platforms): use entire texture stretched
+                }
+                // For animated sprite sheets (characters, enemies)
+                else if(m_usingSpriteSheet && m_animated) {
+                    int row = m_currentFrame / m_framesPerRow;
+                    int col = m_currentFrame % m_framesPerRow;
+                    
+                    SDL_Rect srcRect = {
+                        m_spriteWidth * col,
+                        m_spriteHeight * row,
+                        m_spriteWidth,
+                        m_spriteHeight
+                    };
+                    SDL_RenderCopy(renderer, m_texture, &srcRect, &destRect);
+                }
+                // For static textures (stretched to fit)
+                else {
                     SDL_RenderCopy(renderer, m_texture, NULL, &destRect);
                 }
             } 
@@ -341,52 +414,71 @@ public:
                 SDL_RenderDrawRect(renderer, &destRect);
             }
         }
-    
-    // Texture management methods
-    void setTexture(SDL_Texture* texture) { 
-        m_texture = texture; 
-    }
-    
-    // For multi-row sprite sheets
-    void setSpriteSheet(int frameWidth, int frameHeight, int totalFrames, int framesPerRow, float frameRate = 10.0f) {
-        m_usingSpriteSheet = true;
-        m_spriteWidth = frameWidth;
-        m_spriteHeight = frameHeight;
-        m_totalFrames = totalFrames;
-        m_framesPerRow = framesPerRow;
-        m_frameDuration = 1.0f / frameRate;
-        m_animated = true;
         
-        std::cout << "Sprite sheet configured: " << frameWidth << "x" << frameHeight 
-                  << ", " << totalFrames << " frames, " << framesPerRow << " per row" << std::endl;
-    }
+        // Texture management methods
+        void setTexture(SDL_Texture* texture) { 
+            m_texture = texture; 
+        }
+        
+        // For multi-row sprite sheets
+        void setSpriteSheet(int frameWidth, int frameHeight, int totalFrames, int framesPerRow, float frameRate = 10.0f) {
+            m_usingSpriteSheet = true;
+            m_spriteWidth = frameWidth;
+            m_spriteHeight = frameHeight;
+            m_totalFrames = totalFrames;
+            m_framesPerRow = framesPerRow;
+            m_frameDuration = 1.0f / frameRate;
+            m_animated = true;
+            
+            std::cout << "Sprite sheet configured: " << frameWidth << "x" << frameHeight 
+                      << ", " << totalFrames << " frames, " << framesPerRow << " per row" << std::endl;
+        }
+        
+        // For single-row sprite sheets (backward compatibility)
+        void setSpriteSheet(int frameWidth, int frameHeight, int totalFrames, float frameRate = 10.0f) {
+            setSpriteSheet(frameWidth, frameHeight, totalFrames, totalFrames, frameRate);
+        }
+        
+        void setStaticFrame(int frame) {
+            m_currentFrame = frame;
+            m_animated = false; // Don't animate platforms
+        }
     
-    // For single-row sprite sheets (backward compatibility)
-    void setSpriteSheet(int frameWidth, int frameHeight, int totalFrames, float frameRate = 10.0f) {
-        setSpriteSheet(frameWidth, frameHeight, totalFrames, totalFrames, frameRate);
-    }
+        // Set specific tile from the sprite sheet
+        void setTile(int tileX, int tileY, int tileWidth, int tileHeight) {
+            m_usingSpriteSheet = true;
+            m_spriteWidth = tileWidth;
+            m_spriteHeight = tileHeight;
+            m_currentFrame = tileY * m_framesPerRow + tileX; // Calculate frame index
+            m_animated = false; // Static for platforms
+            m_totalFrames = 1; // Only using one frame
+        }
     
-    void setStaticFrame(int frame) {
-        m_currentFrame = frame;
-        m_animated = false;
-    }
+        // Set specific source rectangle directly
+        void setSourceRect(int x, int y, int width, int height) {
+            m_usingCustomSource = true;
+            m_customSrcRect = {x, y, width, height};
+            m_animated = false;
+        }
+        
+    private:
+        std::string m_textureKey;
+        SDL_Color m_color;
+        SDL_Texture* m_texture;
+        SDL_Rect m_customSrcRect = {0, 0, 0, 0};
     
-private:
-    std::string m_textureKey;
-    SDL_Color m_color;
-    SDL_Texture* m_texture;
-    
-    // Sprite sheet animation properties
-    bool m_usingSpriteSheet = false;
-    bool m_animated = false;
-    int m_spriteWidth = 0;
-    int m_spriteHeight = 0;
-    int m_totalFrames = 1;
-    int m_framesPerRow = 1;  // frames per row for multi-row sheets
-    int m_currentFrame = 0;
-    float m_animationTimer = 0.0f;
-    float m_frameDuration = 0.1f;
-};
+        // Sprite sheet animation properties
+        bool m_usingSpriteSheet = false;
+        bool m_animated = false;
+        int m_spriteWidth = 0;
+        int m_spriteHeight = 0;
+        int m_totalFrames = 1;
+        int m_framesPerRow = 1;  // frames per row for multi-row sheets
+        int m_currentFrame = 0;
+        float m_animationTimer = 0.0f;
+        float m_frameDuration = 0.1f;
+        bool m_usingCustomSource = false;
+    };
 
 // ========================
 // Collision System
@@ -650,9 +742,6 @@ public:
 // ========================
 // XML Parser
 // ========================
-// ========================
-// XML Parser
-// ========================
 class XMLParser {
     public:
         static std::vector<std::unique_ptr<GameObject>> parseXML(SDL_Renderer* renderer, const std::string& filename);
@@ -787,6 +876,34 @@ class XMLParser {
                 }
                 currentAttributes.clear();
                 std::cout << "--- Finished GameObject ---" << std::endl;
+            }
+            else if (line.find("<TilingBackgroundComponent") != std::string::npos) {
+                std::string completeTag = readCompleteTag(file, line);
+                currentAttributes["textureKey"] = extractAttribute(completeTag, "textureKey");
+                currentAttributes["scrollSpeedX"] = extractAttribute(completeTag, "scrollSpeedX");
+                currentAttributes["scrollSpeedY"] = extractAttribute(completeTag, "scrollSpeedY");
+                
+                std::cout << "TilingBackgroundComponent: " << currentAttributes["textureKey"] 
+                          << " scroll: (" << currentAttributes["scrollSpeedX"] << "," << currentAttributes["scrollSpeedY"] << ")" << std::endl;
+            }
+            else if (line.find("<SpriteComponent") != std::string::npos) {
+                std::string completeTag = readCompleteTag(file, line);
+                currentAttributes["textureKey"] = extractAttribute(completeTag, "textureKey");
+                currentAttributes["spriteSheet"] = extractAttribute(completeTag, "spriteSheet");
+                currentAttributes["frameWidth"] = extractAttribute(completeTag, "frameWidth");
+                currentAttributes["frameHeight"] = extractAttribute(completeTag, "frameHeight");
+                currentAttributes["totalFrames"] = extractAttribute(completeTag, "totalFrames");
+                currentAttributes["frameRate"] = extractAttribute(completeTag, "frameRate");
+                currentAttributes["color"] = extractAttribute(completeTag, "color");
+                // Add tile attributes
+                currentAttributes["tileX"] = extractAttribute(completeTag, "tileX");
+                currentAttributes["tileY"] = extractAttribute(completeTag, "tileY");
+                currentAttributes["tileWidth"] = extractAttribute(completeTag, "tileWidth");
+                currentAttributes["tileHeight"] = extractAttribute(completeTag, "tileHeight");
+                
+                std::cout << "SpriteComponent - textureKey: " << currentAttributes["textureKey"] 
+                          << ", tileX: " << currentAttributes["tileX"]
+                          << ", tileY: " << currentAttributes["tileY"] << std::endl;
             }
         }
         
@@ -926,7 +1043,73 @@ class XMLParser {
                 obj->add<BounceBehaviorComponent>(amplitude, frequency);
             }
         }
-        
+        else if (type == "tiling_background") {
+            // Tiling background object - SAFELY get attributes
+            std::string textureKey = "";
+            if (attrs.find("textureKey") != attrs.end()) {
+                textureKey = attrs.at("textureKey");
+            } else {
+                std::cerr << "ERROR: tiling_background missing required textureKey attribute" << std::endl;
+                return nullptr;
+            }
+            
+            float scrollSpeedX = 0.0f;
+            float scrollSpeedY = 0.0f;
+            
+            if (attrs.find("scrollSpeedX") != attrs.end()) {
+                scrollSpeedX = std::stof(attrs.at("scrollSpeedX"));
+            }
+            if (attrs.find("scrollSpeedY") != attrs.end()) {
+                scrollSpeedY = std::stof(attrs.at("scrollSpeedY"));
+            }
+            
+            std::cout << "Creating tiling background with texture: " << textureKey 
+                      << " scroll: (" << scrollSpeedX << "," << scrollSpeedY << ")" << std::endl;
+            
+            obj->add<TilingBackgroundComponent>(textureKey, scrollSpeedX, scrollSpeedY);
+        }
+        else if (type == "platform" || type == "moving_platform") {
+            // Platform
+            float x = std::stof(attrs.at("x"));
+            float y = std::stof(attrs.at("y"));
+            float width = std::stof(attrs.at("width"));
+            float height = std::stof(attrs.at("height"));
+            
+            obj->add<BodyComponent>(x, y, width, height);
+            obj->add<SolidComponent>();
+            
+            // Handle sprite with texture or color
+            if (attrs.find("textureKey") != attrs.end() && !attrs.at("textureKey").empty()) {
+                auto sprite = obj->add<SpriteComponent>(attrs.at("textureKey"));
+                SDL_Texture* texture = textureManager.getTexture(attrs.at("textureKey"));
+                if (texture) {
+                    sprite->setTexture(texture);
+                    
+                    // Check if we should use a specific tile from the tilesheet
+                    if (attrs.find("tileX") != attrs.end() && attrs.find("tileY") != attrs.end()) {
+                        int tileX = std::stoi(attrs.at("tileX"));
+                        int tileY = std::stoi(attrs.at("tileY"));
+                        int tileWidth = std::stoi(attrs.at("tileWidth"));
+                        int tileHeight = std::stoi(attrs.at("tileHeight"));
+                        
+                        sprite->setTile(tileX, tileY, tileWidth, tileHeight);
+                        std::cout << "Platform using tile: " << tileX << "," << tileY 
+                                  << " (" << tileWidth << "x" << tileHeight << ")" << std::endl;
+                    }
+                }
+            } else if (attrs.find("color") != attrs.end()) {
+                SDL_Color color = parseColor(attrs.at("color"));
+                obj->add<SpriteComponent>("", color);
+            }
+            
+            // Moving platform behavior
+            if (type == "moving_platform") {
+                float left = std::stof(attrs.at("left"));
+                float right = std::stof(attrs.at("right"));
+                float speed = std::stof(attrs.at("speed"));
+                obj->add<HorizontalMoveBehaviorComponent>(left, right, speed);
+            }
+        }
         return obj;
     }
 // ========================
@@ -1038,18 +1221,9 @@ public:
             // Update camera to follow player
             updateCamera();
             
-            // Render
-            SDL_SetRenderDrawColor(m_renderer, 40, 40, 40, 255);
-            SDL_RenderClear(m_renderer);
+            // Render with proper background handling
+            render();
             
-            // Draw objects (including ground platforms)
-            for(auto& obj : m_gameObjects) {
-                if(obj->isActive) {
-                    obj->draw(m_renderer, m_camera);
-                }
-            }
-            
-            SDL_RenderPresent(m_renderer);
             SDL_Delay(16);
         }
     }
@@ -1065,9 +1239,10 @@ public:
     
 private:
     void updateCamera() {
-        auto playerObj = m_gameObjects[0].get(); // Player is first object
-        auto playerBody = playerObj->get<BodyComponent>();
+        auto playerObj = findPlayer();
+        if (!playerObj) return;
         
+        auto playerBody = playerObj->get<BodyComponent>();
         if(playerBody) {
             // Follow player's center
             float playerCenterX = playerBody->x + playerBody->width / 2;
@@ -1076,8 +1251,41 @@ private:
         }
     }
     
+    GameObject* findPlayer() {
+        for(auto& obj : m_gameObjects) {
+            if(obj->get<ControllerComponent>()) { // Player has controller
+                return obj.get();
+            }
+        }
+        return nullptr;
+    }
+    
+    void render() {
+        // Clear the screen
+        SDL_SetRenderDrawColor(m_renderer, 40, 40, 40, 255);
+        SDL_RenderClear(m_renderer);
+        
+        // Render backgrounds first (all objects with TilingBackgroundComponent)
+        for(auto& obj : m_gameObjects) {
+            if(obj->isActive && obj->get<TilingBackgroundComponent>()) {
+                obj->draw(m_renderer, m_camera);
+            }
+        }
+        
+        // Then render all other game objects (platforms, player, enemies, etc.)
+        for(auto& obj : m_gameObjects) {
+            if(obj->isActive && !obj->get<TilingBackgroundComponent>()) {
+                obj->draw(m_renderer, m_camera);
+            }
+        }
+        
+        SDL_RenderPresent(m_renderer);
+    }
+    
     void checkCollisions() {
-        auto playerObj = m_gameObjects[0].get(); // Player is first object
+        auto playerObj = findPlayer();
+        if (!playerObj) return;
+        
         auto playerBody = playerObj->get<BodyComponent>();
         auto playerController = playerObj->get<ControllerComponent>();
         
@@ -1087,8 +1295,14 @@ private:
         playerController->setOnPlatform(false, nullptr);
         
         // Check collisions with all other objects
-        for(size_t i = 1; i < m_gameObjects.size(); ++i) {
+        for(size_t i = 0; i < m_gameObjects.size(); ++i) {
             auto otherObj = m_gameObjects[i].get();
+            
+            // Skip the player object itself and background objects
+            if(otherObj == playerObj || otherObj->get<TilingBackgroundComponent>()) {
+                continue;
+            }
+            
             auto otherBody = otherObj->get<BodyComponent>();
             auto otherSolid = otherObj->get<SolidComponent>();
             auto otherEnemy = otherObj->get<EnemyComponent>();
@@ -1113,15 +1327,18 @@ private:
                 }
             }
             
+            // Handle enemy physics with platforms
             if(otherEnemy) {
                 auto enemyBody = otherBody;
                 auto enemyPhysics = otherObj->get<PhysicsComponent>();
                 
                 // Only check collisions for enemies that have physics (gravity)
                 if(enemyPhysics) {
-                    for(size_t j = 1; j < m_gameObjects.size(); ++j) {
-                        // Don't check collision with self
-                        if(i == j) continue;
+                    for(size_t j = 0; j < m_gameObjects.size(); ++j) {
+                        // Don't check collision with self or background
+                        if(i == j || m_gameObjects[j].get()->get<TilingBackgroundComponent>()) {
+                            continue;
+                        }
                         
                         auto groundObj = m_gameObjects[j].get();
                         auto groundBody = groundObj->get<BodyComponent>();
