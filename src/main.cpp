@@ -98,7 +98,7 @@ public:
         if(it != m_textures.end()) {
             SDL_DestroyTexture(it->second);
             m_textures.erase(it);
-            std::cout << "Removed old cached texture" << std::endl;
+            std::cout << "Removed old cached texture: " << textureKey << std::endl;
         }
         
         // Load new texture
@@ -1159,10 +1159,13 @@ public:
             std::cerr << "Renderer creation failed: " << SDL_GetError() << std::endl;
             return false;
         }
+        m_gameObjects.clear();
+        TextureManager::getInstance().cleanup();
         
+        std::cout << "=== LOADING NEW LEVEL ===" << std::endl;
         // Load game objects from XML with texture support
         m_gameObjects = XMLComponentFactory::createFromXML(m_renderer, "scene.xml");
-        
+        debugLoadedObjects();
         return true;
     }
     
@@ -1213,6 +1216,33 @@ public:
     }
     
 private:
+    void debugLoadedObjects() {
+        std::cout << "=== LOADED OBJECTS DEBUG ===" << std::endl;
+        int platformCount = 0;
+        int movingPlatformCount = 0;
+        int totalObjects = 0;
+        
+        for(auto& obj : m_gameObjects) {
+            totalObjects++;
+            if(obj->get<SolidComponent>()) {
+                platformCount++;
+                auto body = obj->get<BodyComponent>();
+                if(body) {
+                    std::cout << "Platform at: " << body->x << "," << body->y 
+                            << " size: " << body->width << "x" << body->height << std::endl;
+                }
+            }
+            if(obj->get<HorizontalMoveBehaviorComponent>()) {
+                movingPlatformCount++;
+            }
+        }
+        
+        std::cout << "Total objects: " << totalObjects << std::endl;
+        std::cout << "Platforms: " << platformCount << std::endl;
+        std::cout << "Moving platforms: " << movingPlatformCount << std::endl;
+        std::cout << "=============================" << std::endl;
+    }
+
     void updateCamera() {
         auto playerObj = findPlayer();
         if (!playerObj) return;
