@@ -12,8 +12,8 @@
 
     <!-- Player with 12-frame animation -->
     <GameObject type="player">
-        <BodyComponent x="100" y="400" width="128" height="96" />
-        <SpriteComponent textureKey="player_texture" spriteSheet="true" frameWidth="128" frameHeight="96" totalFrames="12" frameRate="12" />
+        <BodyComponent x="100" y="400" width="35" height="80" />
+        <SpriteComponent textureKey="player_texture" spriteSheet="true" frameWidth="150" frameHeight="131" totalFrames="12" frameRate="12" />
         <ControllerComponent />
     </GameObject>
 

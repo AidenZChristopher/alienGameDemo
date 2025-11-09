@@ -1450,7 +1450,7 @@ class Game {
                 
                 if(!otherBody) continue;
                 
-                // Check player collisions
+                // Check player collisions - USE FULL BODY SIZE (no scaling)
                 if(CollisionSystem::checkCollision(playerBody, otherBody)) {
                     // Check if it's an enemy - if so, player dies and respawns
                     if(otherEnemy) {
@@ -1558,22 +1558,31 @@ class Game {
         }
         
         void renderDebugInfo(SDL_Renderer* renderer) {
-            // Optional: Add debug rendering here
-            // For example: player position, FPS counter, collision boxes, etc.
+            View& mainView = Engine::getMainView(); // Add this line if missing
             
             auto playerObj = findPlayer();
             if (playerObj) {
                 auto playerBody = playerObj->get<BodyComponent>();
                 if (playerBody) {
-                    // Draw player collision box in debug mode
-                    View& mainView = Engine::getMainView();
+                    // Draw the ACTUAL collision box (full size - no scaling)
                     SDL_Rect debugRect = mainView.getTransformedRect(
-                        playerBody->x, playerBody->y, 
-                        playerBody->width, playerBody->height
+                        playerBody->x,  // No offset
+                        playerBody->y,  // No offset
+                        playerBody->width,  // Full width
+                        playerBody->height  // Full height
                     );
                     
                     SDL_SetRenderDrawColor(renderer, 255, 0, 0, 128); // Semi-transparent red
                     SDL_RenderDrawRect(renderer, &debugRect);
+                    
+                    // The visual bounds are the same as collision bounds now
+                    // So we don't need the green box, or keep it to show they're identical
+                    SDL_Rect visualRect = mainView.getTransformedRect(
+                        playerBody->x, playerBody->y, 
+                        playerBody->width, playerBody->height
+                    );
+                    SDL_SetRenderDrawColor(renderer, 0, 255, 0, 64); // Semi-transparent green
+                    SDL_RenderDrawRect(renderer, &visualRect);
                 }
             }
         }
