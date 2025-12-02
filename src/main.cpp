@@ -164,6 +164,11 @@ public:
             SDL_FillRect(surface, NULL, SDL_MapRGB(surface->format, 255, 0, 255));
         } else {
             std::cout << "Successfully loaded BMP: " << surface->w << "x" << surface->h << std::endl;
+            
+            // Enable color keying to make white (255, 255, 255) transparent
+            // This removes the white background from sprites
+            Uint32 colorKey = SDL_MapRGB(surface->format, 255, 255, 255);
+            SDL_SetColorKey(surface, SDL_TRUE, colorKey);
         }
         
         SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
@@ -174,8 +179,11 @@ public:
             return nullptr;
         }
         
+        // Enable alpha blending on the texture for transparency support
+        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+        
         m_textures[textureKey] = texture;
-        std::cout << "Texture created and cached successfully" << std::endl;
+        std::cout << "Texture created and cached successfully with transparency enabled" << std::endl;
         return texture;
     }
     
@@ -282,6 +290,7 @@ public:
     virtual void update(float dt) = 0;
     virtual void draw(SDL_Renderer* r, const View& view) = 0;    
     GameObject& parent() { return *m_parent; }
+    const GameObject& parent() const { return *m_parent; }
     void setParent(GameObject* p) { m_parent = p; }
     
 protected:
@@ -302,15 +311,25 @@ class GameObject {
             return ptr;
         }
     
-        template<typename T>
-        T* get() {
-            for(auto& c : components) {
-                if(auto ptr = dynamic_cast<T*>(c.get())) {
-                    return ptr;
-                }
+    template<typename T>
+    T* get() {
+        for(auto& c : components) {
+            if(auto ptr = dynamic_cast<T*>(c.get())) {
+                return ptr;
             }
-            return nullptr;
         }
+        return nullptr;
+    }
+
+    template<typename T>
+    const T* get() const {
+        for(const auto& c : components) {
+            if(auto ptr = dynamic_cast<T*>(c.get())) {
+                return ptr;
+            }
+        }
+        return nullptr;
+    }
     
         void update(float dt) {
             for(auto& c : components) {
@@ -864,10 +883,12 @@ class SpriteComponent : public Component {
             // Update animation frame if needed
             if(m_animated && m_totalFrames > 0 && m_frameDuration > 0.0f) {
                 m_animationTimer += dt;
-                // Handle multiple frame advances if deltaTime is large
-                while(m_animationTimer >= m_frameDuration && m_totalFrames > 0) {
+                // Determine how many frames we should loop through
+                int frameLoopCount = (m_framesInRow > 0) ? m_framesInRow : m_totalFrames;
+
+                while(m_animationTimer >= m_frameDuration && frameLoopCount > 0) {
                     m_animationTimer -= m_frameDuration;
-                    m_currentFrame = (m_currentFrame + 1) % m_totalFrames;
+                    m_currentFrame = (m_currentFrame + 1) % frameLoopCount;
                 }
             }
         }
@@ -891,34 +912,98 @@ class SpriteComponent : public Component {
                 }
                 // For sprite sheets with static frames (platforms)
                 else if(m_usingSpriteSheet && !m_animated) {
+                    // Ensure sprite dimensions are valid
+                    if (m_spriteWidth <= 0 || m_spriteHeight <= 0) {
+                        SDL_RenderCopy(renderer, m_texture, NULL, &destRect);
+                        return;
+                    }
+                    
                     // Calculate row and column for the static frame
                     int row = m_currentFrame / m_framesPerRow;
                     int col = m_currentFrame % m_framesPerRow;
                     
-                    SDL_Rect srcRect = {
-                        m_spriteWidth * col,
-                        m_spriteHeight * row,
-                        m_spriteWidth,
-                        m_spriteHeight
-                    };
+                    // Calculate source rectangle - EXACTLY one frame
+                    int srcX = m_spriteWidth * col;
+                    int srcY = m_spriteHeight * row;
+                    int srcW = m_spriteWidth;   // Width of ONE frame only
+                    int srcH = m_spriteHeight;  // Height of ONE frame only
+                    
+                    // Get texture dimensions to clamp source rectangle
+                    int texWidth, texHeight;
+                    SDL_QueryTexture(m_texture, NULL, NULL, &texWidth, &texHeight);
+                    
+                    // Clamp source rectangle to ensure it doesn't exceed texture bounds
+                    if (srcX + srcW > texWidth) srcW = texWidth - srcX;
+                    if (srcY + srcH > texHeight) srcH = texHeight - srcY;
+                    if (srcX < 0) { srcX = 0; }
+                    if (srcY < 0) { srcY = 0; }
+                    
+                    // Ensure we have valid dimensions
+                    if (srcW <= 0) srcW = m_spriteWidth;
+                    if (srcH <= 0) srcH = m_spriteHeight;
+                    
+                    SDL_Rect srcRect = { srcX, srcY, srcW, srcH };
                     SDL_RenderCopy(renderer, m_texture, &srcRect, &destRect);
                 }
                 // For animated sprite sheets (characters, enemies)
                 else if(m_usingSpriteSheet && m_animated) {
-                    // Ensure currentFrame is within valid bounds
-                    int safeFrame = (m_currentFrame >= 0 && m_currentFrame < m_totalFrames) 
-                                    ? m_currentFrame 
-                                    : (m_currentFrame % m_totalFrames + m_totalFrames) % m_totalFrames;
+                    // Ensure sprite dimensions are valid
+                    if (m_spriteWidth <= 0 || m_spriteHeight <= 0) {
+                        // Fallback to rendering entire texture if dimensions not set
+                        SDL_RenderCopy(renderer, m_texture, NULL, &destRect);
+                        return;
+                    }
                     
-                    int row = safeFrame / m_framesPerRow;
-                    int col = safeFrame % m_framesPerRow;
+                    int row, col;
+                    if (m_framesInRow > 0 && m_animationRow >= 0) {
+                        // Row-based animation (stay within specified row)
+                        // Clamp currentFrame to valid range for this row
+                        int safeFrame = m_currentFrame;
+                        if (safeFrame < 0) safeFrame = 0;
+                        if (safeFrame >= m_framesInRow) safeFrame = safeFrame % m_framesInRow;
+                        col = safeFrame;
+                        row = m_animationRow;
+                        
+                        // Ensure row is valid
+                        if (row < 0) row = 0;
+                        int maxRows = (m_totalFrames + m_framesPerRow - 1) / m_framesPerRow;
+                        if (row >= maxRows) row = maxRows - 1;
+                    } else {
+                        // Default behaviour: iterate through entire sprite sheet
+                        int safeFrame = (m_currentFrame >= 0 && m_currentFrame < m_totalFrames) 
+                                        ? m_currentFrame 
+                                        : (m_currentFrame % m_totalFrames + m_totalFrames) % m_totalFrames;
+                        row = safeFrame / m_framesPerRow;
+                        col = safeFrame % m_framesPerRow;
+                    }
                     
-                    SDL_Rect srcRect = {
-                        m_spriteWidth * col,
-                        m_spriteHeight * row,
-                        m_spriteWidth,
-                        m_spriteHeight
-                    };
+                    // Clamp column to valid range
+                    if (col < 0) col = 0;
+                    if (col >= m_framesPerRow) col = m_framesPerRow - 1;
+                    
+                    // Calculate source rectangle - EXACTLY one frame (one tile from tilesheet)
+                    int srcX = m_spriteWidth * col;   // X position in tilesheet (column * frameWidth)
+                    int srcY = m_spriteHeight * row;  // Y position in tilesheet (row * frameHeight)
+                    int srcW = m_spriteWidth;         // Width of EXACTLY one frame
+                    int srcH = m_spriteHeight;        // Height of EXACTLY one frame
+                    
+                    // Get texture dimensions to validate
+                    int texWidth, texHeight;
+                    SDL_QueryTexture(m_texture, NULL, NULL, &texWidth, &texHeight);
+                    
+                    // Clamp source rectangle to ensure it doesn't exceed texture bounds
+                    if (srcX + srcW > texWidth) srcW = texWidth - srcX;
+                    if (srcY + srcH > texHeight) srcH = texHeight - srcY;
+                    if (srcX < 0) { srcX = 0; }
+                    if (srcY < 0) { srcY = 0; }
+                    
+                    // Final safety: ensure dimensions are exactly one frame, no more
+                    if (srcW > m_spriteWidth) srcW = m_spriteWidth;
+                    if (srcH > m_spriteHeight) srcH = m_spriteHeight;
+                    if (srcW <= 0) srcW = m_spriteWidth;
+                    if (srcH <= 0) srcH = m_spriteHeight;
+                    
+                    SDL_Rect srcRect = { srcX, srcY, srcW, srcH };
                     SDL_RenderCopy(renderer, m_texture, &srcRect, &destRect);
                 }
                 // For static textures (stretched to fit)
@@ -952,11 +1037,30 @@ class SpriteComponent : public Component {
             m_animated = true;
             m_animationTimer = 0.0f;
             m_currentFrame = 0;
+            m_framesInRow = 0;
+            m_animationRow = -1;
             
             std::cout << "Sprite sheet configured: " << frameWidth << "x" << frameHeight 
                       << ", " << totalFrames << " frames, " << m_framesPerRow << " per row, " 
                       << frameRate << " fps" << std::endl;
+            std::cout << "  -> Expected texture size: " << (frameWidth * framesPerRow) << "x" 
+                      << (frameHeight * ((totalFrames + framesPerRow - 1) / framesPerRow)) << std::endl;
         }
+
+        // Constrain animation to a specific row (optionally specify frames in that row)
+        void setAnimationRow(int row, int framesInRow = -1, bool resetFrame = true) {
+            m_animationRow = row;
+            if (framesInRow > 0) {
+                m_framesInRow = framesInRow;
+            }
+
+            if (resetFrame) {
+                m_currentFrame = 0;
+                m_animationTimer = 0.0f;
+            }
+        }
+
+        int getAnimationRow() const { return m_animationRow; }
         
         // For single-row sprite sheets (backward compatibility)
         void setSpriteSheet(int frameWidth, int frameHeight, int totalFrames, float frameRate = 10.0f) {
@@ -1013,6 +1117,8 @@ class SpriteComponent : public Component {
         int m_currentFrame = 0;
         float m_animationTimer = 0.0f;
         float m_frameDuration = 0.1f;
+        int m_animationRow = -1;   // Which row to animate (for multi-row sprite sheets)
+        int m_framesInRow = 0;     // Number of frames available in the animation row
         bool m_usingCustomSource = false;
     };
 
@@ -1157,6 +1263,20 @@ public:
     
     bool isGrounded() const { return m_grounded || m_onPlatform; }
     bool isDead() const { return m_isDead; }
+    bool isMoving() const {
+        auto body = parent().get<BodyComponent>();
+        auto physics = parent().get<Box2DPhysicsComponent>();
+        
+        if (physics && IsValid(physics->getBodyId())) {
+            // Check Box2D velocity
+            b2Vec2 vel = b2Body_GetLinearVelocity(physics->getBodyId());
+            return std::abs(vel.x) > 0.1f;
+        } else if (body) {
+            // Check legacy velocity
+            return std::abs(body->velocityX) > 0.1f;
+        }
+        return false;
+    }
     void die() { 
         m_isDead = true;
         m_attachedPlatform = nullptr;
@@ -1482,11 +1602,26 @@ class XMLParser {
                 int totalFrames = std::stoi(attrs.at("totalFrames"));
                 float frameRate = std::stof(attrs.at("frameRate"));
                 
+                // Check if framesPerRow is specified (for multi-row sprite sheets)
+                int framesPerRow = totalFrames; // Default: assume single row
+                if (attrs.find("framesPerRow") != attrs.end()) {
+                    framesPerRow = std::stoi(attrs.at("framesPerRow"));
+                }
+                
                 std::cout << "=== CONFIGURING PLAYER SPRITE SHEET ===" << std::endl;
                 std::cout << "Frame: " << frameWidth << "x" << frameHeight << std::endl;
                 std::cout << "Frames: " << totalFrames << " at " << frameRate << " fps" << std::endl;
+                std::cout << "Frames per row: " << framesPerRow << std::endl;
                 
-                sprite->setSpriteSheet(frameWidth, frameHeight, totalFrames, frameRate);
+                // Use 5-parameter version to support multi-row sprite sheets
+                sprite->setSpriteSheet(frameWidth, frameHeight, totalFrames, framesPerRow, frameRate);
+                
+                // If this is the player character with multi-row sprite sheet, set up row-based animation
+                if (texture && framesPerRow < totalFrames) {
+                    // Initialize with idle animation (row 0, top row)
+                    sprite->setAnimationRow(0, framesPerRow);
+                    std::cout << "Player sprite initialized with row-based animation (row 0)" << std::endl;
+                }
             }
             
             obj->add<ControllerComponent>();
@@ -1765,6 +1900,15 @@ class Game {
             // Handle shooting
             handleShooting();
             
+            // Update shooting timer
+            if (m_playerShootTimer > 0.0f) {
+                m_playerShootTimer -= deltaTime;
+                if (m_playerShootTimer < 0.0f) m_playerShootTimer = 0.0f;
+            }
+            
+            // Update player animations based on state
+            updatePlayerAnimations();
+            
             // Update all game objects using proper deltaTime
             for(auto& obj : m_gameObjects) {
                 if(obj->isActive) {
@@ -2012,12 +2156,21 @@ class Game {
                     
                     // The visual bounds are the same as collision bounds now
                     // So we don't need the green box, or keep it to show they're identical
+                    // Draw green rectangle using the ACTUAL BodyComponent dimensions
                     SDL_Rect visualRect = mainView.getTransformedRect(
                         playerBody->x, playerBody->y, 
-                        playerBody->width, playerBody->height
+                        playerBody->width,  // Use actual width from BodyComponent
+                        playerBody->height  // Use actual height from BodyComponent
                     );
                     SDL_SetRenderDrawColor(renderer, 0, 255, 0, 64); // Semi-transparent green
                     SDL_RenderDrawRect(renderer, &visualRect);
+                    
+                    // Debug: Print dimensions occasionally to verify they're correct
+                    static int debugCounter = 0;
+                    if (debugCounter++ % 300 == 0) {
+                        std::cout << "DEBUG: Green rectangle dimensions - width: " << playerBody->width 
+                                  << ", height: " << playerBody->height << std::endl;
+                    }
                 }
             }
         }
@@ -2101,15 +2254,26 @@ class Game {
             const float playerStartX = platform1X + 50.0f; // Center-ish on first platform
             const float playerStartY = platformY - 80.0f; // Above the platform
             auto player = std::make_unique<GameObject>();
-            player->add<BodyComponent>(playerStartX, playerStartY, 35, 80);
+            
+            // Tilesheet: 8 columns x 7 rows (56 frames total)
+            // Each tile: 64x32 pixels (assuming 512x224 texture: 512/8=64, 224/7=32)
+            // Original tile ratio: 64:32 = 2:1 (width:height)
+            const int tileWidth = 64;   // 512 / 8
+            const int tileHeight = 32;  // 224 / 7
+            const float originalRatio = static_cast<float>(tileWidth) / static_cast<float>(tileHeight); // 2.0 (2:1 ratio)
+            
+            // Keep character height and calculate width to maintain original 2:1 ratio
+            const float playerHeight = 64.0f; // Keep at current height
+            const float playerWidth = playerHeight * originalRatio; // 64 * 2.0 = 128 pixels (maintains 2:1 ratio)
+            
+            player->add<BodyComponent>(playerStartX, playerStartY, playerWidth, playerHeight);
             auto playerSprite = player->add<SpriteComponent>("player_texture");
             SDL_Texture* playerTexture = textureManager.getTexture("player_texture");
             if (playerTexture) {
-                playerSprite->setTexture(playerTexture);
-                playerSprite->setSpriteSheet(150, 131, 12, 12, 12.0f); // 12 frames, 12 fps
+                loadCharacterSprite(playerSprite, playerTexture);
             }
             auto playerPhysics = player->add<Box2DPhysicsComponent>(Box2DPhysicsComponent::DYNAMIC, 1.0f, 0.3f, 0.3f);
-            playerPhysics->createBody(playerStartX, playerStartY, 35, 80);
+            playerPhysics->createBody(playerStartX, playerStartY, playerWidth, playerHeight);
             m_gameObjects.push_back(std::move(player));
             // Track player as first dynamic body
             m_dynamicBodies.push_back(m_gameObjects.back().get());
@@ -2119,22 +2283,73 @@ class Game {
             const float enemySpacing = (platform2Width - 100.0f) / (numEnemies + 1); // Space them evenly
             const float enemyY = platformY - 64.0f; // Above the platform
             
+            // Enemy tilesheet: 664x64 pixels, 1 row x 8 columns (8 frames total)
+            // Each frame: 664/8 = 83 pixels wide, 64 pixels tall
+            const int enemyFrameWidth = 83;   // 664 / 8
+            const int enemyFrameHeight = 64;  // 64 pixels tall
+            const int enemyTotalFrames = 8;   // 8 frames in 1 row
+            const int enemyFramesPerRow = 8;  // 8 frames per row
+            
             for (int i = 0; i < numEnemies; ++i) {
                 float enemyX = platform2X + 50.0f + (i + 1) * enemySpacing; // Position evenly on platform
                 auto enemy = std::make_unique<GameObject>();
-                enemy->add<BodyComponent>(enemyX, enemyY, 83, 64);
+                enemy->add<BodyComponent>(enemyX, enemyY, enemyFrameWidth, enemyFrameHeight);
                 auto enemySprite = enemy->add<SpriteComponent>("enemy_texture");
                 SDL_Texture* enemyTexture = textureManager.getTexture("enemy_texture");
                 if (enemyTexture) {
-                    enemySprite->setTexture(enemyTexture);
-                    enemySprite->setSpriteSheet(83, 64, 8, 8, 8.0f); // 8 frames, 8 fps
+                    loadEnemySprite(enemySprite, enemyTexture);
                 }
                 auto enemyPhysics = enemy->add<Box2DPhysicsComponent>(Box2DPhysicsComponent::DYNAMIC, 1.0f, 0.3f, 0.3f);
-                enemyPhysics->createBody(enemyX, enemyY, 83, 64);
+                enemyPhysics->createBody(enemyX, enemyY, enemyFrameWidth, enemyFrameHeight);
                 enemy->add<EnemyComponent>();
                 m_gameObjects.push_back(std::move(enemy));
                 m_dynamicBodies.push_back(m_gameObjects.back().get());
             }
+        }
+        
+        // Helper function to load and configure character sprite
+        // Character tilesheet: 8x7 grid (8 columns x 7 rows = 56 frames total)
+        void loadCharacterSprite(SpriteComponent* sprite, SDL_Texture* texture) {
+            if (!sprite || !texture) return;
+            
+            // Get actual texture dimensions to verify
+            int texWidth, texHeight;
+            SDL_QueryTexture(texture, NULL, NULL, &texWidth, &texHeight);
+            std::cout << "Character texture loaded: " << texWidth << "x" << texHeight << " pixels" << std::endl;
+            
+            // Character tilesheet: 512x224 pixels, 8x7 grid (8 columns x 7 rows = 56 frames total)
+            // Grid layout: 8 columns, 7 rows
+            // Each frame: 512/8 = 64 pixels wide, 224/7 = 32 pixels tall
+            const int characterFrameWidth = 64;   // 512 / 8 columns
+            const int characterFrameHeight = 32;  // 224 / 7 rows
+            const int characterTotalFrames = 56;  // 8 columns * 7 rows = 56 frames
+            const int characterFramesPerRow = 8;  // 8 frames per row (8 columns)
+            const int characterRows = 7;            // 7 rows in the grid
+            
+            sprite->setTexture(texture);
+            // Configure character sprite sheet: 8x7 grid, 512x224 pixels, 56 frames total
+            sprite->setSpriteSheet(characterFrameWidth, characterFrameHeight, characterTotalFrames, characterFramesPerRow, 10.0f);
+            // Initialize with idle animation (row 0, top row)
+            sprite->setAnimationRow(0, 8); // Start with idle animation
+            
+            std::cout << "Character sprite configured: " << characterFrameWidth << "x" << characterFrameHeight 
+                      << " frames, 8x7 grid, starting at row 0" << std::endl;
+        }
+        
+        // Helper function to load and configure enemy sprite
+        void loadEnemySprite(SpriteComponent* sprite, SDL_Texture* texture) {
+            if (!sprite || !texture) return;
+            
+            // Enemy tilesheet: 664x64 pixels, 1 row x 8 columns (8 frames total)
+            // Each frame: 664/8 = 83 pixels wide, 64 pixels tall
+            const int enemyFrameWidth = 83;   // 664 / 8
+            const int enemyFrameHeight = 64;  // 64 pixels tall
+            const int enemyTotalFrames = 8;    // 8 frames in 1 row
+            const int enemyFramesPerRow = 8;   // 8 frames per row
+            
+            sprite->setTexture(texture);
+            // Configure enemy sprite sheet: 664x64, 1 row x 8 columns, 8 frames total
+            sprite->setSpriteSheet(enemyFrameWidth, enemyFrameHeight, enemyTotalFrames, enemyFramesPerRow, 8.0f);
         }
         
         bool isPlayerGrounded(Box2DPhysicsComponent* physics, BodyComponent* body) {
@@ -2463,9 +2678,39 @@ class Game {
                 float bulletY = playerBody->y + playerBody->height / 2;
                 
                 shootBullet(bulletX, bulletY, directionX);
+                m_playerShootTimer = 0.3f; // Show shooting animation for 0.3 seconds
             }
             
             mouseWasPressed = mousePressed;
+        }
+        
+        void updatePlayerAnimations() {
+            auto playerObj = findPlayer();
+            if (!playerObj) return;
+            
+            auto playerSprite = playerObj->get<SpriteComponent>();
+            if (!playerSprite) return;
+            
+            auto playerController = playerObj->get<ControllerComponent>();
+            if (!playerController) return;
+            
+            // Determine animation state: shooting > running > idle
+            int newAnimationRow = 0;
+            if (m_playerShootTimer > 0.0f) {
+                // Shooting animation (row 5, which is the 6th row, 0-indexed)
+                newAnimationRow = 5;
+            } else if (playerController->isMoving()) {
+                // Running animation (row 1, which is the 2nd row, 0-indexed)
+                newAnimationRow = 1;
+            } else {
+                // Idle animation (row 0, which is the top row)
+                newAnimationRow = 0;
+            }
+            
+            // Only change animation row if it's different from current
+            if (playerSprite->getAnimationRow() != newAnimationRow) {
+                playerSprite->setAnimationRow(newAnimationRow, 8, true); // Reset frame when changing rows
+            }
         }
         
         void updateBullets(float deltaTime) {
@@ -2775,6 +3020,7 @@ class Game {
         b2AABB m_lastAABB;
         float m_raycastTimer = 0.0f;
         float m_aabbTimer = 0.0f;
+        float m_playerShootTimer = 0.0f; // Timer for shooting animation
     };
 
 // ========================
