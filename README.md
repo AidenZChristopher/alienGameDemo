@@ -43,11 +43,10 @@ This engine demonstrates a modern game architecture where gameplay logic is divi
 
 ## 📸 Screenshots
 
-| Feature | Screenshot |
-|---------|------------|
-| **Platforms & Player** | <img width="400" alt="Platforms and Player" src="https://github.com/user-attachments/assets/f697b43d-6244-432f-88b2-9479e583158f"> |
-| **Patrolling Enemies** | <img width="400" alt="Patrolling Enemies" src="https://github.com/user-attachments/assets/95d2ace5-370e-4be6-94d5-9f642488f38a"> |
-| **Bouncing Enemies** | <img width="400" alt="Bouncing Enemies" src="https://github.com/user-attachments/assets/9219bbbc-876c-4211-a2b1-15874272a883"> |
+<img width="517" height="351" alt="Screenshot 2025-12-02 022218" src="https://github.com/user-attachments/assets/529935a1-1894-4b20-85eb-9dc7573fad63" />
+<img width="439" height="286" alt="Screenshot 2025-12-02 022206" src="https://github.com/user-attachments/assets/156a83b8-9514-4287-a5be-851e02bee84d" />
+<img width="959" height="726" alt="Screenshot 2025-12-02 022156" src="https://github.com/user-attachments/assets/b9092f88-fd07-4bca-97f6-62a7cd064b26" />
+<img width="987" height="770" alt="Screenshot 2025-12-02 022137" src="https://github.com/user-attachments/assets/a2cdab40-5108-4401-8545-08883243eac1" />
 
 ## 🏗️ Architecture
 
@@ -110,12 +109,9 @@ The View class handles camera transformations and viewport logic, tracking:
 The engine stores a static View instance initialized during startup, and all rendering accounts for View transformations.
 
 ### Frame Rate Management
+The engine includes a frame rate limiter to maintain consistent FPS. A static `deltaTime` variable stores the duration of the last frame, ensuring consistent movement and animation speeds across all systems.
+
+### Frame Rate Management
 The engine includes a frame rate limiter to maintain consistent FPS. A static `deltaTime` variable stores the duration of the last frame, ensuring consistent movement and animation speeds across all systems
-<img width="517" height="351" alt="Screenshot 2025-12-02 022218" src="https://github.com/user-attachments/assets/529935a1-1894-4b20-85eb-9dc7573fad63" />
 
-<img width="439" height="286" alt="Screenshot 2025-12-02 022206" src="https://github.com/user-attachments/assets/156a83b8-9514-4287-a5be-851e02bee84d" />
-
-<img width="959" height="726" alt="Screenshot 2025-12-02 022156" src="https://github.com/user-attachments/assets/b9092f88-fd07-4bca-97f6-62a7cd064b26" />
-
-<img width="987" height="770" alt="Screenshot 2025-12-02 022137" src="https://github.com/user-attachments/assets/a2cdab40-5108-4401-8545-08883243eac1" />
 
