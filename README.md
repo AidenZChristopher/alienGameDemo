@@ -1,136 +1,121 @@
-This project is a component-based 2D platformer engine built using C++17 and SDL2.
-It demonstrates a modular game architecture where gameplay logic is divided into self-contained components (physics, rendering, behavior, etc.) that can be dynamically composed into GameObject entities.
+# Component-Based 2D Game Engine
 
-🎮 Overview
+A comprehensive 2D game engine built using C++17, SDL2, and Box2D featuring a modular Entity-Component System (ECS) architecture with realistic physics simulation.
 
-The engine supports:
+![Game Screenshot](https://github.com/user-attachments/assets/f697b43d-6244-432f-88b2-9479e583158f)
 
-Player movement with gravity, jumping, and collision handling
+## 🎮 Overview
 
-Animated sprite sheets
+This engine demonstrates a modern game architecture where gameplay logic is divided into self-contained components that can be dynamically composed into GameObject entities. It features full Box2D physics integration, sprite animation, XML-based level loading, and a robust component system.
 
-Moving and static platforms
-<img width="986" height="735" alt="Screenshot 2025-11-08 205844" src="https://github.com/user-attachments/assets/f697b43d-6244-432f-88b2-9479e583158f" />
+## ✨ Features
 
-Patrolling and bouncing enemies
-<img width="1004" height="772" alt="Screenshot 2025-11-08 205826" src="https://github.com/user-attachments/assets/95d2ace5-370e-4be6-94d5-9f642488f38a" />
-<img width="796" height="612" alt="Screenshot 2025-11-08 205918" src="https://github.com/user-attachments/assets/9219bbbc-876c-4211-a2b1-15874272a883" />
+### 🧱 **Entity-Component System (ECS)**
+- **Modular Design**: Each GameObject can have multiple components defining behavior
+- **Dynamic Composition**: Components can be added/removed at runtime
+- **Clean Separation**: Rendering, physics, and logic are isolated in separate components
 
-A following camera system
+### ⚙️ **Box2D Physics Integration**
+- **Realistic Physics**: Full Box2D integration for accurate collision and movement
+- **Dynamic & Static Bodies**: Support for both movable and fixed objects
+- **Physics Queries**:
+  - **Raycasting**: Detect intersections with physics bodies
+  - **AABB Querying**: Find bodies within specified areas
+  - **Contact Listening**: Real-time collision detection and response
+- **Runtime Manipulation**: Add/remove physics bodies during gameplay
 
-A centralized input and texture management system
+### 🎨 **Rendering System**
+- **Animated Sprite Sheets**: Multi-row sprite sheet support with frame-based animation
+- **Texture Management**: Centralized texture loading and caching
+- **Camera System**: Smooth following camera with viewport transformations
+- **Tiling Backgrounds**: Infinite scrolling background support
 
-⚙️ Features
-🧱 Entity-Component System (ECS)
+### 🎯 **Gameplay Systems**
+- **Player Controller**: Movement, jumping, and physics-based interaction
+- **Enemy AI**: Patrolling and bouncing enemy behaviors
+- **Bullet System**: Projectile physics with collision detection
+- **Destructible Objects**: Boxes that can be destroyed by bullets
 
-Each GameObject can have multiple components attached to define its behavior, such as:
+### 📁 **Asset & Level Management**
+- **XML-Based Level Loading**: Create levels using XML configuration files
+- **Texture Factory**: Load and manage textures from asset definitions
+- **Component Factory**: Dynamic object creation from XML specifications
 
-BodyComponent – Tracks position, size, and velocity
+## 📸 Screenshots
 
-SpriteComponent – Handles textures and sprite sheet animations
+| Feature | Screenshot |
+|---------|------------|
+| **Platforms & Player** | <img width="400" alt="Platforms and Player" src="https://github.com/user-attachments/assets/f697b43d-6244-432f-88b2-9479e583158f"> |
+| **Patrolling Enemies** | <img width="400" alt="Patrolling Enemies" src="https://github.com/user-attachments/assets/95d2ace5-370e-4be6-94d5-9f642488f38a"> |
+| **Bouncing Enemies** | <img width="400" alt="Bouncing Enemies" src="https://github.com/user-attachments/assets/9219bbbc-876c-4211-a2b1-15874272a883"> |
 
-ControllerComponent – Manages player input and movement
+## 🏗️ Architecture
 
-PhysicsComponent – Adds gravity and physics-based motion
+### Core Components
 
-PatrolBehaviorComponent / BounceBehaviorComponent – Controls enemy AI movement
+Each GameObject can have multiple components attached to define its behavior:
 
-SolidComponent / EnemyComponent – Marks objects for collision or enemy logic
+| Component | Description |
+|-----------|-------------|
+| **BodyComponent** | Tracks position, size, and velocity |
+| **SpriteComponent** | Handles textures and sprite sheet animations |
+| **ControllerComponent** | Manages player input and movement |
+| **PhysicsComponent** | Adds gravity and physics-based motion |
+| **Box2DPhysicsComponent** | Full Box2D physics integration |
+| **PatrolBehaviorComponent** | Controls patrolling enemy AI movement |
+| **BounceBehaviorComponent** | Controls bouncing enemy movement |
+| **SolidComponent** | Marks objects for collision |
+| **EnemyComponent** | Marks objects as enemies |
+| **BulletComponent** | Manages projectile behavior |
+| **DestructibleBoxComponent** | Marks objects as destructible |
 
-🎮 Input System
+### System Managers
 
-A centralized InputSystem uses SDL keyboard state tracking to detect key presses and transitions:
+| System | Description |
+|--------|-------------|
+| **InputSystem** | Centralized input management with key state tracking |
+| **TextureManager** | Loads, caches, and manages all textures |
+| **CollisionSystem** | Provides bounding-box collision detection and resolution |
+| **Box2DWorld** | Manages the Box2D physics world |
+| **XMLComponentFactory** | Creates objects from XML configuration |
 
-isKeyPressed(key)
+## 🎮 Controls
 
-isKeyJustPressed(key)
+| Key | Action |
+|-----|--------|
+| **W / ↑** | Jump |
+| **A / ←** | Move Left |
+| **D / →** | Move Right |
+| **Space** | Jump / Apply Impulse |
+| **Left Click / J** | Shoot Bullet |
+| **C** | Spawn New Box |
+| **X** | Remove Last Box |
+| **R** | Perform Raycast |
+| **Q** | Perform AABB Query |
+| **F** | Apply Force (Right) |
+| **V** | Set Random Velocity |
+| **Esc** | Quit Game |
 
-🎨 Rendering System
+## 📁 Technical Implementation
 
-TextureManager loads, caches, and manages all textures.
+### Asset Management
+Assets can be loaded from XML or dynamically enumerated from a folder. Textures are stored in a map structure that associates asset names with file paths, ensuring efficient retrieval and reuse throughout the engine.
 
-Missing textures are replaced with a magenta placeholder.
+### View Class
+The View class handles camera transformations and viewport logic, tracking:
+- Center position
+- Scale
+- Rotation angle (optional)
 
-SpriteComponent supports static textures and animated multi-row sprite sheets.
+The engine stores a static View instance initialized during startup, and all rendering accounts for View transformations.
 
-📷 Camera System
+### Frame Rate Management
+The engine includes a frame rate limiter to maintain consistent FPS. A static `deltaTime` variable stores the duration of the last frame, ensuring consistent movement and animation speeds across all systems
+<img width="517" height="351" alt="Screenshot 2025-12-02 022218" src="https://github.com/user-attachments/assets/529935a1-1894-4b20-85eb-9dc7573fad63" />
 
-A lightweight Camera class centers the viewport on the player and converts world coordinates into screen coordinates for smooth scrolling and tracking.
+<img width="439" height="286" alt="Screenshot 2025-12-02 022206" src="https://github.com/user-attachments/assets/156a83b8-9514-4287-a5be-851e02bee84d" />
 
-⚡ Collision Handling
+<img width="959" height="726" alt="Screenshot 2025-12-02 022156" src="https://github.com/user-attachments/assets/b9092f88-fd07-4bca-97f6-62a7cd064b26" />
 
-The CollisionSystem provides:
+<img width="987" height="770" alt="Screenshot 2025-12-02 022137" src="https://github.com/user-attachments/assets/a2cdab40-5108-4401-8545-08883243eac1" />
 
-Bounding-box collision detection
-
-Platform collision resolution
-
-Support for moving and static platforms
-
-Accurate vertical and horizontal collision responses
-
-🧩 XML Factory Simulation
-
-The XMLComponentFactory simulates XML-based object creation, generating:
-
-The Player
-
-Ground and moving platforms
-
-Patrolling and flying enemies
-
-🧭 Controls
-Key	Action
-A / ←	Move Left
-D / →	Move Right
-Space / ↑	Jump
-Esc / Close Window	Quit
-
-🗂️ Asset Management Using XML
-
-Assets can be loaded from XML or dynamically enumerated from a folder.
-
-Textures are stored in a map structure that associates asset names with file paths.
-
-This system ensures efficient retrieval and reuse of textures throughout the engine.
-
-🪟 View Class Implementation
-
-Added a View class to handle camera transformations and viewport logic.
-
-The View tracks:
-
-Center position
-
-Scale
-
-Rotation angle (optional)
-
-The engine stores a static View instance initialized during startup.
-
-The sprite draw function now accounts for the View transformation.
-⏱️ Frame Rate Limiting & Delta Time
-
-The engine includes a frame rate limiter to maintain a consistent FPS.
-
-The target frame rate can be statically configured.
-
-If frame processing exceeds the ideal duration, the engine skips waiting to catch up.
-
-A static deltaTime variable stores the duration of the last frame, ensuring consistent movement and animation speeds across all systems.
-
-🧰 Tech Stack
-
-Language: C++17
-
-Framework: SDL2
-
-Architecture: Entity-Component System (ECS)
-
-🚀 Future Improvements
-
-Multiple camera views
-
-Configurable physics and collision layers
-
-Enhanced XML-driven level editor
