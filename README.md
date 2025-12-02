@@ -2,8 +2,6 @@
 
 A comprehensive 2D game engine built using C++17, SDL2, and Box2D featuring a modular Entity-Component System (ECS) architecture with realistic physics simulation.
 
-![Game Screenshot](https://github.com/user-attachments/assets/f697b43d-6244-432f-88b2-9479e583158f)
-
 ## 🎮 Overview
 
 This engine demonstrates a modern game architecture where gameplay logic is divided into self-contained components that can be dynamically composed into GameObject entities. It features full Box2D physics integration, sprite animation, XML-based level loading, and a robust component system.
