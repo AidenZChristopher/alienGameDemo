@@ -2532,26 +2532,50 @@ class Game {
         
         void createDestructibleBox(float x, float y, float width, float height) {
             auto& textureManager = TextureManager::getInstance();
-            auto box = std::make_unique<GameObject>();
-            box->add<BodyComponent>(x, y, width, height);
-            box->add<SolidComponent>(); // Makes it solid for collision
-            box->add<DestructibleBoxComponent>(); // Marks it as destructible
-            
-            auto boxSprite = box->add<SpriteComponent>("tile_texture");
             SDL_Texture* tileTexture = textureManager.getTexture("tile_texture");
+            
+            // Create bottom box
+            auto box1 = std::make_unique<GameObject>();
+            box1->add<BodyComponent>(x, y, width, height);
+            box1->add<SolidComponent>(); // Makes it solid for collision
+            box1->add<DestructibleBoxComponent>(); // Marks it as destructible
+            
+            auto boxSprite1 = box1->add<SpriteComponent>("tile_texture");
             if (tileTexture) {
-                boxSprite->setTexture(tileTexture);
-                boxSprite->setTile(0, 0, 16, 16); // Use tileset tile
+                boxSprite1->setTexture(tileTexture);
+                boxSprite1->setTile(0, 0, 16, 16); // Use tileset tile
             } else {
                 // Fallback to brown colored rectangle if texture not loaded
-                boxSprite = box->add<SpriteComponent>("", SDL_Color{139, 69, 19, 255}); // Brown color
+                boxSprite1 = box1->add<SpriteComponent>("", SDL_Color{139, 69, 19, 255}); // Brown color
             }
             
             // Create static body so player can stand on it
-            auto physics = box->add<Box2DPhysicsComponent>(Box2DPhysicsComponent::STATIC, 0.0f, 0.7f, 0.1f);
-            physics->createBody(x, y, width, height);
+            auto physics1 = box1->add<Box2DPhysicsComponent>(Box2DPhysicsComponent::STATIC, 0.0f, 0.7f, 0.1f);
+            physics1->createBody(x, y, width, height);
             
-            m_gameObjects.push_back(std::move(box));
+            m_gameObjects.push_back(std::move(box1));
+            
+            // Create top box (stacked on top of bottom box)
+            float topBoxY = y - height; // Stack the second box on top
+            auto box2 = std::make_unique<GameObject>();
+            box2->add<BodyComponent>(x, topBoxY, width, height);
+            box2->add<SolidComponent>(); // Makes it solid for collision
+            box2->add<DestructibleBoxComponent>(); // Marks it as destructible
+            
+            auto boxSprite2 = box2->add<SpriteComponent>("tile_texture");
+            if (tileTexture) {
+                boxSprite2->setTexture(tileTexture);
+                boxSprite2->setTile(0, 0, 16, 16); // Use tileset tile
+            } else {
+                // Fallback to brown colored rectangle if texture not loaded
+                boxSprite2 = box2->add<SpriteComponent>("", SDL_Color{139, 69, 19, 255}); // Brown color
+            }
+            
+            // Create static body for top box
+            auto physics2 = box2->add<Box2DPhysicsComponent>(Box2DPhysicsComponent::STATIC, 0.0f, 0.7f, 0.1f);
+            physics2->createBody(x, topBoxY, width, height);
+            
+            m_gameObjects.push_back(std::move(box2));
         }
         
         void removeLastDynamicBody() {
