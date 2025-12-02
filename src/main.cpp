@@ -10,6 +10,7 @@
 #include <fstream>
 #include <string>
 #include <sstream>
+#include <box2d/box2d.h>
 
 // ========================
 // Forward Declarations
@@ -25,6 +26,10 @@ class BounceBehaviorComponent;
 class HorizontalMoveBehaviorComponent;
 class SolidComponent;
 class EnemyComponent;
+class Box2DPhysicsComponent;
+class Box2DContactListener;
+class BulletComponent;
+class DestructibleBoxComponent;
 
 // ========================
 // Camera
@@ -326,6 +331,177 @@ class GameObject {
     };
 
 // ========================
+// Box2D Integration
+// ========================
+
+// Helper functions for Box2D ID validation
+inline bool IsValid(b2WorldId id) {
+    return id.index1 != 0;
+}
+
+inline bool IsValid(b2BodyId id) {
+    return id.index1 != 0;
+}
+
+// Box2D World Manager (Singleton)
+class Box2DWorld {
+public:
+    static Box2DWorld& getInstance() {
+        static Box2DWorld instance;
+        return instance;
+    }
+    
+    void initialize(const b2Vec2& gravity = b2Vec2{0.0f, 9.8f}) {
+        if (IsValid(m_worldId)) {
+            b2DestroyWorld(m_worldId);
+        }
+        
+        b2WorldDef worldDef = b2DefaultWorldDef();
+        worldDef.gravity = gravity;
+        m_worldId = b2CreateWorld(&worldDef);
+        
+        // Create contact listener
+        m_contactListener = std::make_unique<Box2DContactListener>();
+        // Note: Box2D C API contact listener setup may vary by version
+        // Contact events will be handled through query callbacks if needed
+        
+        std::cout << "Box2D World initialized with gravity: " << gravity.x << ", " << gravity.y << std::endl;
+    }
+    
+    void update(float dt) {
+        if (IsValid(m_worldId)) {
+            // Cap delta time for stability
+            const float maxDt = 1.0f / 30.0f; // Cap at 30 FPS minimum
+            float clampedDt = std::min(dt, maxDt);
+            
+            b2World_Step(m_worldId, clampedDt, m_velocityIterations);
+        }
+    }
+    
+    void shutdown() {
+        if (IsValid(m_worldId)) {
+            b2DestroyWorld(m_worldId);
+            m_worldId = {0};
+        }
+        m_contactListener.reset();
+    }
+    
+    b2WorldId getWorld() const { return m_worldId; }
+    
+    // Raycasting
+    struct RaycastResult {
+        bool hit;
+        b2Vec2 point;
+        b2Vec2 normal;
+        float fraction;
+        b2BodyId bodyId;
+    };
+    
+    RaycastResult rayCast(const b2Vec2& point1, const b2Vec2& point2) {
+        RaycastResult result;
+        result.hit = false;
+        result.fraction = 1.0f;
+        
+        if (!IsValid(m_worldId)) return result;
+        
+        b2QueryFilter filter = b2DefaultQueryFilter();
+        b2Vec2 translation = {point2.x - point1.x, point2.y - point1.y};
+        b2RayResult rayResult = b2World_CastRayClosest(m_worldId, point1, translation, filter);
+        
+        if (rayResult.hit) {
+            result.hit = true;
+            result.point = rayResult.point;
+            result.normal = rayResult.normal;
+            result.fraction = rayResult.fraction;
+            result.bodyId = b2Shape_GetBody(rayResult.shapeId);
+        }
+        
+        return result;
+    }
+    
+    // AABB Query
+    void queryAABB(const b2AABB& aabb, std::vector<b2BodyId>& results) {
+        results.clear();
+        if (!IsValid(m_worldId)) return;
+        
+        QueryCallback callback;
+        b2QueryFilter filter = b2DefaultQueryFilter();
+        b2World_OverlapAABB(m_worldId, aabb, filter, QueryWrapper, &callback);
+        results = callback.foundBodies;
+    }
+    
+    Box2DContactListener* getContactListener() const {
+        return m_contactListener.get();
+    }
+    
+private:
+    Box2DWorld() = default;
+    ~Box2DWorld() { shutdown(); }
+    Box2DWorld(const Box2DWorld&) = delete;
+    Box2DWorld& operator=(const Box2DWorld&) = delete;
+    
+    b2WorldId m_worldId = {0};
+    int m_velocityIterations = 6;
+    
+    std::unique_ptr<Box2DContactListener> m_contactListener;
+    
+    // AABB Query callback
+    class QueryCallback {
+    public:
+        std::vector<b2BodyId> foundBodies;
+    };
+    
+    static bool QueryWrapper(b2ShapeId shapeId, void* context) {
+        QueryCallback* callback = static_cast<QueryCallback*>(context);
+        b2BodyId bodyId = b2Shape_GetBody(shapeId);
+        if (IsValid(bodyId)) {
+            callback->foundBodies.push_back(bodyId);
+        }
+        return true; // Continue query
+    }
+    
+};
+
+// Contact Listener for collision events
+// Note: Box2D C API contact listening is handled differently than C++ API
+// For demonstration, we can check contacts manually using queries
+class Box2DContactListener {
+public:
+    struct Contact {
+        b2BodyId bodyIdA;
+        b2BodyId bodyIdB;
+        GameObject* objA;
+        GameObject* objB;
+    };
+    
+    void handleContact(b2BodyId bodyIdA, b2BodyId bodyIdB) {
+        if (!IsValid(bodyIdA) || !IsValid(bodyIdB)) return;
+        
+        GameObject* objA = static_cast<GameObject*>(b2Body_GetUserData(bodyIdA));
+        GameObject* objB = static_cast<GameObject*>(b2Body_GetUserData(bodyIdB));
+        
+        if (objA && objB) {
+            // Store contact for processing later
+            Contact contact;
+            contact.bodyIdA = bodyIdA;
+            contact.bodyIdB = bodyIdB;
+            contact.objA = objA;
+            contact.objB = objB;
+            m_contacts.push_back(contact);
+        }
+    }
+    
+    std::vector<Contact> getContactsAndClear() {
+        std::vector<Contact> contacts = m_contacts;
+        m_contacts.clear();
+        return contacts;
+    }
+    
+private:
+    std::vector<Contact> m_contacts;
+};
+
+// ========================
 // Required Components
 // ========================
 // ========================
@@ -437,6 +613,184 @@ public:
     float getVelocityY() const { return y - prevY; }
 };
 
+// ========================
+// Box2D Physics Component (moved here to access BodyComponent)
+// ========================
+class Box2DPhysicsComponent : public Component {
+public:
+    enum BodyType {
+        STATIC = b2_staticBody,
+        KINEMATIC = b2_kinematicBody,
+        DYNAMIC = b2_dynamicBody
+    };
+    
+    Box2DPhysicsComponent(BodyType type = DYNAMIC, 
+                         float density = 1.0f,
+                         float friction = 0.3f,
+                         float restitution = 0.1f)
+        : m_bodyType(type), m_density(density), 
+          m_friction(friction), m_restitution(restitution) {}
+    
+    ~Box2DPhysicsComponent() {
+        destroyBody();
+    }
+    
+    void update(float dt) override {
+        auto bodyComp = parent().get<BodyComponent>();
+        if (!bodyComp || !IsValid(m_bodyId)) return;
+        
+        // Sync Box2D position to BodyComponent
+        b2Vec2 position = b2Body_GetPosition(m_bodyId);
+        b2Rot rotation = b2Body_GetRotation(m_bodyId);
+        float angle = b2Rot_GetAngle(rotation);
+        
+        bodyComp->x = position.x * m_physicsToWorldScale;
+        bodyComp->y = position.y * m_physicsToWorldScale;
+        bodyComp->angle = angle;
+        
+        // Update velocity
+        b2Vec2 velocity = b2Body_GetLinearVelocity(m_bodyId);
+        bodyComp->velocityX = velocity.x;
+        bodyComp->velocityY = velocity.y;
+    }
+    
+    void draw(SDL_Renderer* renderer, const View& view) override {
+        // Debug drawing can be added here if needed
+    }
+    
+    // Create a box body
+    void createBody(float x, float y, float width, float height) {
+        auto& world = Box2DWorld::getInstance();
+        b2WorldId physicsWorld = world.getWorld();
+        if (!IsValid(physicsWorld)) return;
+        
+        // Destroy existing body if any
+        if (IsValid(m_bodyId)) {
+            destroyBody();
+        }
+        
+        // Create body definition
+        b2BodyDef bodyDef = b2DefaultBodyDef();
+        bodyDef.type = static_cast<b2BodyType>(m_bodyType);
+        bodyDef.position = b2Vec2{x / m_physicsToWorldScale, y / m_physicsToWorldScale};
+        
+        m_bodyId = b2CreateBody(physicsWorld, &bodyDef);
+        
+        if (!IsValid(m_bodyId)) return;
+        
+        // Store GameObject pointer in userData
+        b2Body_SetUserData(m_bodyId, &parent());
+        
+        // Create box shape
+        b2Polygon polygon = b2MakeBox(
+            (width / 2.0f) / m_physicsToWorldScale,
+            (height / 2.0f) / m_physicsToWorldScale
+        );
+        
+        // Create fixture
+        b2ShapeDef shapeDef = b2DefaultShapeDef();
+        shapeDef.density = m_density;
+        // Friction and restitution are typically set via filter or body properties
+        // Some Box2D C API versions may handle these differently
+        
+        b2CreatePolygonShape(m_bodyId, &shapeDef, &polygon);
+    }
+    
+    // Create a circle body
+    void createCircleBody(float x, float y, float radius) {
+        auto& world = Box2DWorld::getInstance();
+        b2WorldId physicsWorld = world.getWorld();
+        if (!IsValid(physicsWorld)) return;
+        
+        if (IsValid(m_bodyId)) {
+            destroyBody();
+        }
+        
+        b2BodyDef bodyDef = b2DefaultBodyDef();
+        bodyDef.type = static_cast<b2BodyType>(m_bodyType);
+        bodyDef.position = b2Vec2{x / m_physicsToWorldScale, y / m_physicsToWorldScale};
+        
+        m_bodyId = b2CreateBody(physicsWorld, &bodyDef);
+        
+        if (!IsValid(m_bodyId)) return;
+        
+        b2Body_SetUserData(m_bodyId, &parent());
+        
+        b2Circle circle;
+        circle.radius = radius / m_physicsToWorldScale;
+        
+        b2ShapeDef shapeDef = b2DefaultShapeDef();
+        shapeDef.density = m_density;
+        
+        b2CreateCircleShape(m_bodyId, &shapeDef, &circle);
+    }
+    
+    // Apply force at center
+    void applyForce(float forceX, float forceY) {
+        if (!IsValid(m_bodyId)) return;
+        b2Vec2 force = {forceX, forceY};
+        b2Body_ApplyForceToCenter(m_bodyId, force, true);
+    }
+    
+    // Apply force at point
+    void applyForceAtPoint(float forceX, float forceY, float pointX, float pointY) {
+        if (!IsValid(m_bodyId)) return;
+        b2Vec2 force = {forceX, forceY};
+        b2Vec2 point = {pointX / m_physicsToWorldScale, pointY / m_physicsToWorldScale};
+        b2Body_ApplyForce(m_bodyId, force, point, true);
+    }
+    
+    // Apply impulse at center
+    void applyImpulse(float impulseX, float impulseY) {
+        if (!IsValid(m_bodyId)) return;
+        b2Vec2 impulse = {impulseX, impulseY};
+        b2Body_ApplyLinearImpulseToCenter(m_bodyId, impulse, true);
+    }
+    
+    // Set linear velocity
+    void setLinearVelocity(float velX, float velY) {
+        if (!IsValid(m_bodyId)) return;
+        b2Vec2 velocity = {velX, velY};
+        b2Body_SetLinearVelocity(m_bodyId, velocity);
+    }
+    
+    // Set angular velocity
+    void setAngularVelocity(float velocity) {
+        if (!IsValid(m_bodyId)) return;
+        b2Body_SetAngularVelocity(m_bodyId, velocity);
+    }
+    
+    // Get body ID
+    b2BodyId getBodyId() const { return m_bodyId; }
+    
+    // Check if body is awake
+    bool isAwake() const {
+        return IsValid(m_bodyId) ? b2Body_IsAwake(m_bodyId) : false;
+    }
+    
+    void destroyBody() {
+        if (IsValid(m_bodyId)) {
+            auto& world = Box2DWorld::getInstance();
+            b2WorldId physicsWorld = world.getWorld();
+            if (IsValid(physicsWorld)) {
+                b2DestroyBody(m_bodyId);
+                m_bodyId = {0};
+            }
+        }
+    }
+    
+private:
+    b2BodyId m_bodyId = {0};
+    BodyType m_bodyType;
+    float m_density;
+    float m_friction;
+    float m_restitution;
+    
+    // Scale factor: Box2D uses meters, game uses pixels
+    // 1 meter = 100 pixels
+    static constexpr float m_physicsToWorldScale = 100.0f;
+};
+
 // PhysicsComponent - Handles gravity and ground collision for any object
 class PhysicsComponent : public Component {
 public:
@@ -470,6 +824,35 @@ public:
     bool isEnemy = true;
 };
 
+// BulletComponent - Marks an object as a bullet that can kill enemies
+class BulletComponent : public Component {
+public:
+    BulletComponent(float directionX = 1.0f, float speed = 500.0f) 
+        : m_directionX(directionX), m_speed(speed) {}
+    
+    void update(float dt) override {
+        // Bullet movement is handled by Box2D physics
+        // This component just marks the object as a bullet
+    }
+    
+    void draw(SDL_Renderer* renderer, const View& view) override {}
+    
+    float getDirectionX() const { return m_directionX; }
+    float getSpeed() const { return m_speed; }
+    
+private:
+    float m_directionX;  // 1.0 = right, -1.0 = left
+    float m_speed;       // Bullet speed
+};
+
+// DestructibleBoxComponent - Marks an object as a destructible box that can be destroyed by bullets
+class DestructibleBoxComponent : public Component {
+public:
+    void update(float dt) override {}
+    void draw(SDL_Renderer* renderer, const View& view) override {}
+    bool isDestructible = true;
+};
+
 // SpriteComponent with texture and sprite sheet support
 // SpriteComponent with texture and sprite sheet support
 class SpriteComponent : public Component {
@@ -479,10 +862,11 @@ class SpriteComponent : public Component {
         
         void update(float dt) override {
             // Update animation frame if needed
-            if(m_animated) {
+            if(m_animated && m_totalFrames > 0 && m_frameDuration > 0.0f) {
                 m_animationTimer += dt;
-                if(m_animationTimer >= m_frameDuration) {
-                    m_animationTimer = 0;
+                // Handle multiple frame advances if deltaTime is large
+                while(m_animationTimer >= m_frameDuration && m_totalFrames > 0) {
+                    m_animationTimer -= m_frameDuration;
                     m_currentFrame = (m_currentFrame + 1) % m_totalFrames;
                 }
             }
@@ -491,6 +875,11 @@ class SpriteComponent : public Component {
         void draw(SDL_Renderer* renderer, const View& view) override {
             auto body = parent().get<BodyComponent>();
             if(!body) return;
+            
+            // Lazy load texture if not already loaded
+            if(!m_texture && !m_textureKey.empty()) {
+                m_texture = TextureManager::getInstance().getTexture(m_textureKey);
+            }
             
             SDL_Rect destRect = view.getTransformedRect(body->x, body->y, body->width, body->height);
             
@@ -516,8 +905,13 @@ class SpriteComponent : public Component {
                 }
                 // For animated sprite sheets (characters, enemies)
                 else if(m_usingSpriteSheet && m_animated) {
-                    int row = m_currentFrame / m_framesPerRow;
-                    int col = m_currentFrame % m_framesPerRow;
+                    // Ensure currentFrame is within valid bounds
+                    int safeFrame = (m_currentFrame >= 0 && m_currentFrame < m_totalFrames) 
+                                    ? m_currentFrame 
+                                    : (m_currentFrame % m_totalFrames + m_totalFrames) % m_totalFrames;
+                    
+                    int row = safeFrame / m_framesPerRow;
+                    int col = safeFrame % m_framesPerRow;
                     
                     SDL_Rect srcRect = {
                         m_spriteWidth * col,
@@ -553,12 +947,15 @@ class SpriteComponent : public Component {
             m_spriteWidth = frameWidth;
             m_spriteHeight = frameHeight;
             m_totalFrames = totalFrames;
-            m_framesPerRow = framesPerRow;
-            m_frameDuration = 1.0f / frameRate;
+            m_framesPerRow = framesPerRow > 0 ? framesPerRow : 1;
+            m_frameDuration = (frameRate > 0.0f) ? (1.0f / frameRate) : 0.1f;
             m_animated = true;
+            m_animationTimer = 0.0f;
+            m_currentFrame = 0;
             
             std::cout << "Sprite sheet configured: " << frameWidth << "x" << frameHeight 
-                      << ", " << totalFrames << " frames, " << framesPerRow << " per row" << std::endl;
+                      << ", " << totalFrames << " frames, " << m_framesPerRow << " per row, " 
+                      << frameRate << " fps" << std::endl;
         }
         
         // For single-row sprite sheets (backward compatibility)
@@ -1148,6 +1545,15 @@ class XMLParser {
             obj->add<BodyComponent>(x, y, width, height);
             obj->add<EnemyComponent>();
             
+            // Add Box2D physics component to enemies
+            auto enemyPhysics = obj->add<Box2DPhysicsComponent>(
+                Box2DPhysicsComponent::DYNAMIC,
+                1.0f,  // density
+                0.3f,  // friction
+                0.3f   // restitution
+            );
+            enemyPhysics->createBody(x, y, width, height);
+            
             auto sprite = obj->add<SpriteComponent>(attrs.at("textureKey"));
             SDL_Texture* texture = textureManager.getTexture(attrs.at("textureKey"));
             if (texture) {
@@ -1268,7 +1674,10 @@ class Game {
             
             Engine::getInstance().setTargetFPS(60);
             
-            // FORCE COMPLETE CLEANUP - Add these lines
+            // Initialize Box2D world with gravity (keep for potential Box2D features)
+            Box2DWorld::getInstance().initialize(b2Vec2{0.0f, 9.8f});
+            
+            // FORCE COMPLETE CLEANUP
             m_gameObjects.clear();
             TextureManager::getInstance().cleanup();
             
@@ -1281,6 +1690,7 @@ class Game {
                 return false;
             }
             testFile.close();
+            
             // Load game objects from XML
             m_gameObjects = XMLComponentFactory::createFromXML(Engine::getRenderer(), "scene.xml");
             
@@ -1290,7 +1700,19 @@ class Game {
             }
             
             debugLoadedObjects();
+            
+            // Create a destructible box on the first platform
+            // Place it at position (200, 470) - on top of the first platform
+            createDestructibleBox(200, 470, 40, 40);
+            
             std::cout << "=== GAME INITIALIZATION COMPLETE ===" << std::endl;
+            std::cout << "Controls:" << std::endl;
+            std::cout << "WASD - Move player (W=Jump, A=Left, D=Right)" << std::endl;
+            std::cout << "Left Mouse Button or J - Shoot bullet" << std::endl;
+            std::cout << "SPACE - Apply impulse upward" << std::endl;
+            std::cout << "R - Perform raycast" << std::endl;
+            std::cout << "Q - Perform AABB query" << std::endl;
+            
             return true;
         }
         
@@ -1329,6 +1751,7 @@ class Game {
         
         void shutdown() {
             std::cout << "=== SHUTTING DOWN GAME ===" << std::endl;
+            Box2DWorld::getInstance().shutdown();
             m_gameObjects.clear();
             TextureManager::getInstance().cleanup();
             Engine::getInstance().shutdown();
@@ -1336,12 +1759,24 @@ class Game {
         
     private:
         void update(float deltaTime) {
+            // Update Box2D physics world first
+            Box2DWorld::getInstance().update(deltaTime);
+            
+            // Handle shooting
+            handleShooting();
+            
             // Update all game objects using proper deltaTime
             for(auto& obj : m_gameObjects) {
                 if(obj->isActive) {
                     obj->update(deltaTime);
                 }
             }
+            
+            // Update bullets (check out of bounds)
+            updateBullets(deltaTime);
+            
+            // Check bullet-enemy collisions
+            checkBulletCollisions();
             
             updateCamera();
             checkCollisions();
@@ -1587,7 +2022,759 @@ class Game {
             }
         }
         
+        // ========================
+        // Box2D Demo Methods
+        // ========================
+        void createPlatform(float x, float y, float width, float height, SDL_Texture* tileTexture) {
+            auto platform = std::make_unique<GameObject>();
+            platform->add<BodyComponent>(x, y, width, height);
+            auto platformSprite = platform->add<SpriteComponent>("tile_texture");
+            if (tileTexture) {
+                platformSprite->setTexture(tileTexture);
+                platformSprite->setTile(2, 3, 16, 16); // Use ground tile from tileset
+            }
+            auto platformPhysics = platform->add<Box2DPhysicsComponent>(Box2DPhysicsComponent::STATIC, 0.0f, 0.7f, 0.1f);
+            platformPhysics->createBody(x, y, width, height);
+            m_gameObjects.push_back(std::move(platform));
+        }
+        
+        void createBox2DDemoScene() {
+            auto& textureManager = TextureManager::getInstance();
+            SDL_Renderer* renderer = Engine::getRenderer();
+            
+            // Load textures
+            textureManager.loadTexture(renderer, "assets/background.bmp", "background_texture");
+            textureManager.loadTexture(renderer, "assets/character.bmp", "player_texture");
+            textureManager.loadTexture(renderer, "assets/enemy.bmp", "enemy_texture");
+            textureManager.loadTexture(renderer, "assets/tileset.bmp", "tile_texture");
+            
+            SDL_Texture* tileTexture = textureManager.getTexture("tile_texture");
+            
+            // Create tiling background
+            auto background = std::make_unique<GameObject>();
+            background->add<TilingBackgroundComponent>("background_texture", 0.0f, 0.0f);
+            m_gameObjects.push_back(std::move(background));
+            
+            // Platform layout settings
+            const float platformHeight = 30.0f;
+            const float platformY = 500.0f; // Y position for platforms
+            const float platform1Width = 200.0f;
+            const float platform1X = 50.0f;
+            const float gapWidth = 150.0f; // Gap between platforms
+            const float platform2X = platform1X + platform1Width + gapWidth;
+            const float platform2Width = 300.0f;
+            
+            // Create first platform (empty - no enemies)
+            createPlatform(platform1X, platformY, platform1Width, platformHeight, tileTexture);
+            
+            // Create second platform (with enemies)
+            createPlatform(platform2X, platformY, platform2Width, platformHeight, tileTexture);
+            
+            // Create bottom ground/platform at bottom of screen for safety
+            createPlatform(0, 550, 800, 50, tileTexture);
+            
+            // Create left wall with tileset
+            auto leftWall = std::make_unique<GameObject>();
+            leftWall->add<BodyComponent>(0, 0, 20, 600);
+            auto leftWallSprite = leftWall->add<SpriteComponent>("tile_texture");
+            if (tileTexture) {
+                leftWallSprite->setTexture(tileTexture);
+                leftWallSprite->setTile(1, 0, 16, 16); // Use different tile for wall
+            }
+            auto leftWallPhysics = leftWall->add<Box2DPhysicsComponent>(Box2DPhysicsComponent::STATIC, 0.0f, 0.7f, 0.1f);
+            leftWallPhysics->createBody(0, 0, 20, 600);
+            m_gameObjects.push_back(std::move(leftWall));
+            
+            // Create right wall with tileset
+            auto rightWall = std::make_unique<GameObject>();
+            rightWall->add<BodyComponent>(780, 0, 20, 600);
+            auto rightWallSprite = rightWall->add<SpriteComponent>("tile_texture");
+            if (tileTexture) {
+                rightWallSprite->setTexture(tileTexture);
+                rightWallSprite->setTile(1, 0, 16, 16);
+            }
+            auto rightWallPhysics = rightWall->add<Box2DPhysicsComponent>(Box2DPhysicsComponent::STATIC, 0.0f, 0.7f, 0.1f);
+            rightWallPhysics->createBody(780, 0, 20, 600);
+            m_gameObjects.push_back(std::move(rightWall));
+            
+            // Create player character on first platform (empty platform)
+            const float playerStartX = platform1X + 50.0f; // Center-ish on first platform
+            const float playerStartY = platformY - 80.0f; // Above the platform
+            auto player = std::make_unique<GameObject>();
+            player->add<BodyComponent>(playerStartX, playerStartY, 35, 80);
+            auto playerSprite = player->add<SpriteComponent>("player_texture");
+            SDL_Texture* playerTexture = textureManager.getTexture("player_texture");
+            if (playerTexture) {
+                playerSprite->setTexture(playerTexture);
+                playerSprite->setSpriteSheet(150, 131, 12, 12, 12.0f); // 12 frames, 12 fps
+            }
+            auto playerPhysics = player->add<Box2DPhysicsComponent>(Box2DPhysicsComponent::DYNAMIC, 1.0f, 0.3f, 0.3f);
+            playerPhysics->createBody(playerStartX, playerStartY, 35, 80);
+            m_gameObjects.push_back(std::move(player));
+            // Track player as first dynamic body
+            m_dynamicBodies.push_back(m_gameObjects.back().get());
+            
+            // Create enemies on the second platform
+            const int numEnemies = 3;
+            const float enemySpacing = (platform2Width - 100.0f) / (numEnemies + 1); // Space them evenly
+            const float enemyY = platformY - 64.0f; // Above the platform
+            
+            for (int i = 0; i < numEnemies; ++i) {
+                float enemyX = platform2X + 50.0f + (i + 1) * enemySpacing; // Position evenly on platform
+                auto enemy = std::make_unique<GameObject>();
+                enemy->add<BodyComponent>(enemyX, enemyY, 83, 64);
+                auto enemySprite = enemy->add<SpriteComponent>("enemy_texture");
+                SDL_Texture* enemyTexture = textureManager.getTexture("enemy_texture");
+                if (enemyTexture) {
+                    enemySprite->setTexture(enemyTexture);
+                    enemySprite->setSpriteSheet(83, 64, 8, 8, 8.0f); // 8 frames, 8 fps
+                }
+                auto enemyPhysics = enemy->add<Box2DPhysicsComponent>(Box2DPhysicsComponent::DYNAMIC, 1.0f, 0.3f, 0.3f);
+                enemyPhysics->createBody(enemyX, enemyY, 83, 64);
+                enemy->add<EnemyComponent>();
+                m_gameObjects.push_back(std::move(enemy));
+                m_dynamicBodies.push_back(m_gameObjects.back().get());
+            }
+        }
+        
+        bool isPlayerGrounded(Box2DPhysicsComponent* physics, BodyComponent* body) {
+            if (!IsValid(physics->getBodyId()) || !body) return false;
+            
+            // Cast a short ray downward from the player's bottom edge
+            // Box2D body position is at center, so we need to account for half height
+            float halfHeight = (body->height / 2.0f) / 100.0f; // Convert to meters
+            float checkDistance = 8.0f / 100.0f; // 8 pixels in meters
+            b2Vec2 playerPos = b2Body_GetPosition(physics->getBodyId());
+            b2Vec2 rayStart = {playerPos.x, playerPos.y + halfHeight}; // Bottom of player
+            b2Vec2 rayEnd = {playerPos.x, playerPos.y + halfHeight + checkDistance};
+            
+            auto result = Box2DWorld::getInstance().rayCast(rayStart, rayEnd);
+            return result.hit && result.fraction < 1.0f;
+        }
+        
+        void handleBox2DInput() {
+            auto& input = InputSystem::getInstance();
+            
+            // Find player character (first dynamic body with Box2D physics)
+            GameObject* playerObj = nullptr;
+            Box2DPhysicsComponent* playerPhysics = nullptr;
+            BodyComponent* playerBody = nullptr;
+            for (auto& obj : m_gameObjects) {
+                // Skip background objects
+                if (obj->get<TilingBackgroundComponent>()) continue;
+                
+                playerPhysics = obj->get<Box2DPhysicsComponent>();
+                if (playerPhysics && playerPhysics->getBodyId().index1 != 0) {
+                    playerObj = obj.get();
+                    playerBody = obj->get<BodyComponent>();
+                    break; // Use first dynamic body as "player"
+                }
+            }
+            
+            if (!playerPhysics || !playerBody) return;
+            
+            // Check if player is grounded for jumping
+            bool grounded = isPlayerGrounded(playerPhysics, playerBody);
+            
+            // Get current velocity
+            b2Vec2 currentVel = b2Body_GetLinearVelocity(playerPhysics->getBodyId());
+            
+            // WASD Controls
+            const float moveSpeed = 300.0f; // Pixels per second (will be converted to meters)
+            const float jumpImpulse = 500.0f; // Jump strength
+            const float maxSpeed = 400.0f; // Max horizontal speed in pixels per second
+            const float maxSpeedMeters = maxSpeed / 100.0f; // Convert to m/s
+            
+            // W - Jump (only when grounded)
+            if ((input.isKeyJustPressed(SDL_SCANCODE_W) || input.isKeyJustPressed(SDL_SCANCODE_UP)) && grounded) {
+                playerPhysics->applyImpulse(0, -jumpImpulse);
+            }
+            
+            // A - Move left
+            if (input.isKeyPressed(SDL_SCANCODE_A) || input.isKeyPressed(SDL_SCANCODE_LEFT)) {
+                // Apply force left, but clamp to max speed
+                // currentVel.x is in m/s, maxSpeedMeters is in m/s
+                if (currentVel.x > -maxSpeedMeters) {
+                    playerPhysics->applyForce(-moveSpeed * 2.0f, 0);
+                }
+            }
+            
+            // D - Move right
+            if (input.isKeyPressed(SDL_SCANCODE_D) || input.isKeyPressed(SDL_SCANCODE_RIGHT)) {
+                // Apply force right, but clamp to max speed
+                if (currentVel.x < maxSpeedMeters) {
+                    playerPhysics->applyForce(moveSpeed * 2.0f, 0);
+                }
+            }
+            
+            // S - Down (optional: could be used for crouch or fast fall)
+            // For now, we'll leave it unused
+            
+            // Legacy controls still available
+            // SPACE - Apply impulse upward (works even when not grounded)
+            if (input.isKeyJustPressed(SDL_SCANCODE_SPACE)) {
+                playerPhysics->applyImpulse(0, -500);
+            }
+            
+            // F - Apply force to the right
+            if (input.isKeyJustPressed(SDL_SCANCODE_F)) {
+                playerPhysics->applyForce(200, 0);
+            }
+            
+            // R - Perform raycast
+            if (input.isKeyJustPressed(SDL_SCANCODE_R)) {
+                performRaycast();
+            }
+            
+            // Q - Perform AABB query
+            if (input.isKeyJustPressed(SDL_SCANCODE_Q)) {
+                performAABBQuery();
+            }
+            
+            // C - Create new box
+            if (input.isKeyJustPressed(SDL_SCANCODE_C)) {
+                createDynamicBox(100 + (rand() % 600), 100, 30, 30);
+                std::cout << "Created new box! Total dynamic bodies: " << m_dynamicBodies.size() << std::endl;
+            }
+            
+            // X - Remove last box
+            if (input.isKeyJustPressed(SDL_SCANCODE_X)) {
+                removeLastDynamicBody();
+            }
+            
+            // V - Set random velocity
+            if (input.isKeyJustPressed(SDL_SCANCODE_V)) {
+                float velX = (rand() % 200) - 100;
+                float velY = (rand() % 200) - 100;
+                playerPhysics->setLinearVelocity(velX, velY);
+                std::cout << "Set velocity to: " << velX << ", " << velY << std::endl;
+            }
+        }
+        
+        void performRaycast() {
+            // Cast ray from center of screen downward
+            float startX = 400.0f / 100.0f; // Convert pixels to meters
+            float startY = 100.0f / 100.0f;
+            float endX = 400.0f / 100.0f;
+            float endY = 600.0f / 100.0f;
+            
+            b2Vec2 start = {startX, startY};
+            b2Vec2 end = {endX, endY};
+            
+            auto result = Box2DWorld::getInstance().rayCast(start, end);
+            
+            if (result.hit) {
+                std::cout << "Raycast HIT! Point: (" << result.point.x << ", " << result.point.y 
+                          << "), Fraction: " << result.fraction << std::endl;
+                
+                m_lastRaycastStart = b2Vec2{startX * 100.0f, startY * 100.0f}; // Convert back to pixels
+                m_lastRaycastEnd = b2Vec2{result.point.x * 100.0f, result.point.y * 100.0f};
+            } else {
+                std::cout << "Raycast missed!" << std::endl;
+                m_lastRaycastStart = b2Vec2{startX * 100.0f, startY * 100.0f};
+                m_lastRaycastEnd = b2Vec2{endX * 100.0f, endY * 100.0f};
+            }
+            
+            m_showRaycast = true;
+            m_raycastTimer = 0.0f;
+        }
+        
+        void performAABBQuery() {
+            // Query area around center of screen
+            b2AABB queryBox;
+            queryBox.lowerBound = b2Vec2{300.0f / 100.0f, 200.0f / 100.0f};
+            queryBox.upperBound = b2Vec2{500.0f / 100.0f, 400.0f / 100.0f};
+            
+            std::vector<b2BodyId> foundBodies;
+            Box2DWorld::getInstance().queryAABB(queryBox, foundBodies);
+            
+            std::cout << "AABB Query found " << foundBodies.size() << " bodies" << std::endl;
+            
+            m_lastAABB = queryBox;
+            m_showAABB = true;
+            m_aabbTimer = 0.0f;
+        }
+        
+        void createDynamicBox(float x, float y, float width, float height) {
+            auto& textureManager = TextureManager::getInstance();
+            auto box = std::make_unique<GameObject>();
+            box->add<BodyComponent>(x, y, width, height);
+            auto boxSprite = box->add<SpriteComponent>("tile_texture");
+            SDL_Texture* tileTexture = textureManager.getTexture("tile_texture");
+            if (tileTexture) {
+                boxSprite->setTexture(tileTexture);
+                boxSprite->setTile(0, 0, 16, 16); // Use tileset tile
+            } else {
+                // Fallback to colored rectangle if texture not loaded
+                boxSprite = box->add<SpriteComponent>("", SDL_Color{0, 150, 255, 255});
+            }
+            auto physics = box->add<Box2DPhysicsComponent>(Box2DPhysicsComponent::DYNAMIC, 1.0f, 0.3f, 0.3f);
+            physics->createBody(x, y, width, height);
+            
+            m_gameObjects.push_back(std::move(box));
+            m_dynamicBodies.push_back(m_gameObjects.back().get());
+        }
+        
+        void createDestructibleBox(float x, float y, float width, float height) {
+            auto& textureManager = TextureManager::getInstance();
+            auto box = std::make_unique<GameObject>();
+            box->add<BodyComponent>(x, y, width, height);
+            box->add<SolidComponent>(); // Makes it solid for collision
+            box->add<DestructibleBoxComponent>(); // Marks it as destructible
+            
+            auto boxSprite = box->add<SpriteComponent>("tile_texture");
+            SDL_Texture* tileTexture = textureManager.getTexture("tile_texture");
+            if (tileTexture) {
+                boxSprite->setTexture(tileTexture);
+                boxSprite->setTile(0, 0, 16, 16); // Use tileset tile
+            } else {
+                // Fallback to brown colored rectangle if texture not loaded
+                boxSprite = box->add<SpriteComponent>("", SDL_Color{139, 69, 19, 255}); // Brown color
+            }
+            
+            // Create static body so player can stand on it
+            auto physics = box->add<Box2DPhysicsComponent>(Box2DPhysicsComponent::STATIC, 0.0f, 0.7f, 0.1f);
+            physics->createBody(x, y, width, height);
+            
+            m_gameObjects.push_back(std::move(box));
+        }
+        
+        void removeLastDynamicBody() {
+            if (!m_dynamicBodies.empty()) {
+                auto it = std::find_if(m_gameObjects.begin(), m_gameObjects.end(),
+                    [this](const std::unique_ptr<GameObject>& obj) {
+                        return obj.get() == m_dynamicBodies.back();
+                    });
+                
+                if (it != m_gameObjects.end()) {
+                    m_gameObjects.erase(it);
+                    m_dynamicBodies.pop_back();
+                    std::cout << "Removed box! Remaining: " << m_dynamicBodies.size() << std::endl;
+                }
+            }
+        }
+        
+        void drawRaycast(SDL_Renderer* renderer, const View& view) {
+            SDL_SetRenderDrawColor(renderer, 255, 0, 0, 255);
+            
+            int startX = static_cast<int>(view.worldToScreenX(m_lastRaycastStart.x));
+            int startY = static_cast<int>(view.worldToScreenY(m_lastRaycastStart.y));
+            int endX = static_cast<int>(view.worldToScreenX(m_lastRaycastEnd.x));
+            int endY = static_cast<int>(view.worldToScreenY(m_lastRaycastEnd.y));
+            
+            SDL_RenderDrawLine(renderer, startX, startY, endX, endY);
+        }
+        
+        void drawAABB(SDL_Renderer* renderer, const View& view) {
+            SDL_SetRenderDrawColor(renderer, 0, 255, 0, 128);
+            
+            float lowerX = m_lastAABB.lowerBound.x * 100.0f;
+            float lowerY = m_lastAABB.lowerBound.y * 100.0f;
+            float upperX = m_lastAABB.upperBound.x * 100.0f;
+            float upperY = m_lastAABB.upperBound.y * 100.0f;
+            
+            SDL_Rect aabbRect = {
+                static_cast<int>(view.worldToScreenX(lowerX)),
+                static_cast<int>(view.worldToScreenY(lowerY)),
+                static_cast<int>((upperX - lowerX)),
+                static_cast<int>((upperY - lowerY))
+            };
+            
+            SDL_RenderDrawRect(renderer, &aabbRect);
+        }
+        
+        // ========================
+        // Bullet System Methods
+        // ========================
+        void shootBullet(float x, float y, float directionX) {
+            auto bullet = std::make_unique<GameObject>();
+            
+            // Bullet properties
+            const float bulletWidth = 8.0f;
+            const float bulletHeight = 8.0f;
+            const float bulletSpeed = 600.0f; // pixels per second
+            
+            bullet->add<BodyComponent>(x, y, bulletWidth, bulletHeight);
+            
+            // Add bullet component
+            auto bulletComp = bullet->add<BulletComponent>(directionX, bulletSpeed);
+            
+            // Add sprite (yellow/orange bullet)
+            auto bulletSprite = bullet->add<SpriteComponent>("", SDL_Color{255, 200, 0, 255});
+            
+            // Add Box2D physics
+            auto bulletPhysics = bullet->add<Box2DPhysicsComponent>(
+                Box2DPhysicsComponent::DYNAMIC, 
+                0.1f,  // low density
+                0.0f,  // no friction
+                0.0f   // no bounce
+            );
+            bulletPhysics->createCircleBody(x + bulletWidth / 2, y + bulletHeight / 2, bulletWidth / 2);
+            
+            // Set initial velocity
+            float velX = directionX * (bulletSpeed / 100.0f); // Convert to m/s
+            bulletPhysics->setLinearVelocity(velX, 0.0f);
+            
+            // Make bullet a sensor (passes through but detects collisions)
+            // Note: Box2D C API sensor setup may vary
+            
+            m_gameObjects.push_back(std::move(bullet));
+            m_bullets.push_back(m_gameObjects.back().get());
+            
+            std::cout << "Bullet shot at (" << x << ", " << y << ") direction: " << directionX << std::endl;
+        }
+        
+        void handleShooting() {
+            auto& input = InputSystem::getInstance();
+            auto playerObj = findPlayer();
+            
+            if (!playerObj) return;
+            
+            auto playerBody = playerObj->get<BodyComponent>();
+            if (!playerBody) return;
+            
+            // Check for mouse click or key press to shoot
+            static bool mouseWasPressed = false;
+            int mouseX, mouseY;
+            Uint32 mouseState = SDL_GetMouseState(&mouseX, &mouseY);
+            bool mousePressed = (mouseState & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
+            
+            // Shoot on mouse click (left button) or J key
+            if ((mousePressed && !mouseWasPressed) || input.isKeyJustPressed(SDL_SCANCODE_J)) {
+                // Determine direction based on player facing or mouse position
+                float directionX = 1.0f; // Default to right
+                
+                // If using mouse, determine direction based on mouse position relative to player
+                if (mousePressed) {
+                    View& view = Engine::getMainView();
+                    float worldMouseX = view.screenToWorldX(mouseX);
+                    directionX = (worldMouseX > playerBody->x) ? 1.0f : -1.0f;
+                } else {
+                    // Use player's velocity to determine facing direction
+                    if (playerBody->velocityX < 0) {
+                        directionX = -1.0f; // Moving left
+                    }
+                }
+                
+                // Get player position - spawn bullet on the side player is facing
+                float bulletX = (directionX > 0) ? 
+                    playerBody->x + playerBody->width : 
+                    playerBody->x;
+                float bulletY = playerBody->y + playerBody->height / 2;
+                
+                shootBullet(bulletX, bulletY, directionX);
+            }
+            
+            mouseWasPressed = mousePressed;
+        }
+        
+        void updateBullets(float deltaTime) {
+            View& view = Engine::getMainView();
+            
+            // Get camera bounds (world coordinates)
+            float cameraCenterX = view.screenToWorldX(400); // Screen center X
+            float cameraCenterY = view.screenToWorldY(300); // Screen center Y
+            float cameraHalfWidth = 400.0f;  // Half screen width
+            float cameraHalfHeight = 300.0f; // Half screen height
+            
+            // Create AABB for camera bounds
+            b2AABB cameraBounds;
+            cameraBounds.lowerBound = b2Vec2{
+                (cameraCenterX - cameraHalfWidth - 100.0f) / 100.0f,  // Add margin
+                (cameraCenterY - cameraHalfHeight - 100.0f) / 100.0f
+            };
+            cameraBounds.upperBound = b2Vec2{
+                (cameraCenterX + cameraHalfWidth + 100.0f) / 100.0f,
+                (cameraCenterY + cameraHalfHeight + 100.0f) / 100.0f
+            };
+            
+            // Use AABB query to find bullets in camera area
+            std::vector<b2BodyId> bulletsInView;
+            Box2DWorld::getInstance().queryAABB(cameraBounds, bulletsInView);
+            
+            // Track bullets to remove (out of bounds)
+            std::vector<GameObject*> bulletsToRemove;
+            
+            for (auto* bulletObj : m_bullets) {
+                if (!bulletObj || !bulletObj->isActive) continue;
+                
+                auto bulletPhysics = bulletObj->get<Box2DPhysicsComponent>();
+                if (!bulletPhysics || !IsValid(bulletPhysics->getBodyId())) continue;
+                
+                b2Vec2 bulletPos = b2Body_GetPosition(bulletPhysics->getBodyId());
+                float bulletWorldX = bulletPos.x * 100.0f;
+                float bulletWorldY = bulletPos.y * 100.0f;
+                
+                // Check if bullet is outside camera bounds with margin
+                float margin = 200.0f;
+                if (bulletWorldX < cameraCenterX - cameraHalfWidth - margin ||
+                    bulletWorldX > cameraCenterX + cameraHalfWidth + margin ||
+                    bulletWorldY < cameraCenterY - cameraHalfHeight - margin ||
+                    bulletWorldY > cameraCenterY + cameraHalfHeight + margin) {
+                    
+                    bulletsToRemove.push_back(bulletObj);
+                }
+            }
+            
+            // Remove out-of-bounds bullets
+            for (auto* bullet : bulletsToRemove) {
+                auto it = std::find_if(m_gameObjects.begin(), m_gameObjects.end(),
+                    [bullet](const std::unique_ptr<GameObject>& obj) {
+                        return obj.get() == bullet;
+                    });
+                
+                if (it != m_gameObjects.end()) {
+                    m_gameObjects.erase(it);
+                    
+                    // Remove from bullets list
+                    m_bullets.erase(std::remove(m_bullets.begin(), m_bullets.end(), bullet), m_bullets.end());
+                }
+            }
+        }
+        
+        void checkBulletCollisions() {
+            // Get contacts from contact listener
+            auto* contactListener = Box2DWorld::getInstance().getContactListener();
+            if (!contactListener) return;
+            
+            auto contacts = contactListener->getContactsAndClear();
+            
+            std::vector<GameObject*> objectsToRemove;
+            
+            for (const auto& contact : contacts) {
+                GameObject* objA = contact.objA;
+                GameObject* objB = contact.objB;
+                
+                if (!objA || !objB) continue;
+                
+                BulletComponent* bullet = objA->get<BulletComponent>();
+                EnemyComponent* enemy = objB->get<EnemyComponent>();
+                DestructibleBoxComponent* box = objB->get<DestructibleBoxComponent>();
+                
+                // Check if A is bullet and B is enemy
+                if (bullet && enemy) {
+                    objectsToRemove.push_back(objA); // Bullet
+                    objectsToRemove.push_back(objB); // Enemy
+                    std::cout << "Bullet hit enemy!" << std::endl;
+                    continue;
+                }
+                
+                // Check if A is bullet and B is destructible box
+                if (bullet && box) {
+                    objectsToRemove.push_back(objA); // Bullet
+                    objectsToRemove.push_back(objB); // Box
+                    std::cout << "Bullet hit destructible box!" << std::endl;
+                    continue;
+                }
+                
+                // Check if A is enemy and B is bullet (reversed)
+                bullet = objB->get<BulletComponent>();
+                enemy = objA->get<EnemyComponent>();
+                
+                if (bullet && enemy) {
+                    objectsToRemove.push_back(objA); // Enemy
+                    objectsToRemove.push_back(objB); // Bullet
+                    std::cout << "Bullet hit enemy!" << std::endl;
+                    continue;
+                }
+                
+                // Check if A is destructible box and B is bullet (reversed)
+                box = objA->get<DestructibleBoxComponent>();
+                
+                if (bullet && box) {
+                    objectsToRemove.push_back(objA); // Box
+                    objectsToRemove.push_back(objB); // Bullet
+                    std::cout << "Bullet hit destructible box!" << std::endl;
+                }
+            }
+            
+            // Use AABB queries and raycasting to check bullet-enemy collisions
+            for (auto* bulletObj : m_bullets) {
+                if (!bulletObj || !bulletObj->isActive) continue;
+                
+                auto bulletPhysics = bulletObj->get<Box2DPhysicsComponent>();
+                if (!bulletPhysics || !IsValid(bulletPhysics->getBodyId())) continue;
+                
+                auto bulletBody = bulletObj->get<BodyComponent>();
+                if (!bulletBody) continue;
+                
+                b2Vec2 bulletPos = b2Body_GetPosition(bulletPhysics->getBodyId());
+                
+                // Create AABB around bullet for overlap query
+                float bulletHalfWidth = (bulletBody->width / 2.0f) / 100.0f;
+                float bulletHalfHeight = (bulletBody->height / 2.0f) / 100.0f;
+                
+                b2AABB bulletAABB;
+                float margin = 0.2f; // 20 pixels in meters - larger margin for fast bullets
+                bulletAABB.lowerBound = b2Vec2{
+                    bulletPos.x - bulletHalfWidth - margin,
+                    bulletPos.y - bulletHalfHeight - margin
+                };
+                bulletAABB.upperBound = b2Vec2{
+                    bulletPos.x + bulletHalfWidth + margin,
+                    bulletPos.y + bulletHalfHeight + margin
+                };
+                
+                // Query for overlapping bodies
+                std::vector<b2BodyId> overlappingBodies;
+                Box2DWorld::getInstance().queryAABB(bulletAABB, overlappingBodies);
+                
+                // Check if any overlapping body is an enemy
+                for (b2BodyId bodyId : overlappingBodies) {
+                    if (!IsValid(bodyId)) continue;
+                    
+                    void* userData = b2Body_GetUserData(bodyId);
+                    if (!userData) continue;
+                    
+                    GameObject* hitObj = static_cast<GameObject*>(userData);
+                    
+                    if (hitObj && hitObj != bulletObj) {
+                        EnemyComponent* enemy = hitObj->get<EnemyComponent>();
+                        DestructibleBoxComponent* box = hitObj->get<DestructibleBoxComponent>();
+                        
+                        if (enemy) {
+                            // Found collision with enemy!
+                            if (std::find(objectsToRemove.begin(), objectsToRemove.end(), bulletObj) == objectsToRemove.end()) {
+                                objectsToRemove.push_back(bulletObj);
+                            }
+                            if (std::find(objectsToRemove.begin(), objectsToRemove.end(), hitObj) == objectsToRemove.end()) {
+                                objectsToRemove.push_back(hitObj);
+                            }
+                            std::cout << "AABB query detected bullet-enemy collision!" << std::endl;
+                            break; // Only hit one enemy per bullet
+                        } else if (box) {
+                            // Found collision with destructible box!
+                            if (std::find(objectsToRemove.begin(), objectsToRemove.end(), bulletObj) == objectsToRemove.end()) {
+                                objectsToRemove.push_back(bulletObj);
+                            }
+                            if (std::find(objectsToRemove.begin(), objectsToRemove.end(), hitObj) == objectsToRemove.end()) {
+                                objectsToRemove.push_back(hitObj);
+                            }
+                            std::cout << "AABB query detected bullet-box collision!" << std::endl;
+                            break; // Only hit one box per bullet
+                        }
+                    }
+                }
+                
+                // Also use raycasting as backup detection
+                float rayLength = 0.15f; // 15 pixels in meters - longer ray for fast bullets
+                b2Vec2 rayEnd = {
+                    bulletPos.x + (bulletObj->get<BulletComponent>()->getDirectionX() * rayLength),
+                    bulletPos.y
+                };
+                
+                auto rayResult = Box2DWorld::getInstance().rayCast(bulletPos, rayEnd);
+                
+                if (rayResult.hit && IsValid(rayResult.bodyId)) {
+                    void* userData = b2Body_GetUserData(rayResult.bodyId);
+                    if (userData) {
+                        GameObject* hitObj = static_cast<GameObject*>(userData);
+                        
+                        if (hitObj && hitObj != bulletObj) {
+                            EnemyComponent* enemy = hitObj->get<EnemyComponent>();
+                            DestructibleBoxComponent* box = hitObj->get<DestructibleBoxComponent>();
+                            
+                            if (enemy) {
+                                if (std::find(objectsToRemove.begin(), objectsToRemove.end(), bulletObj) == objectsToRemove.end()) {
+                                    objectsToRemove.push_back(bulletObj);
+                                }
+                                if (std::find(objectsToRemove.begin(), objectsToRemove.end(), hitObj) == objectsToRemove.end()) {
+                                    objectsToRemove.push_back(hitObj);
+                                }
+                                std::cout << "Raycast detected bullet-enemy collision!" << std::endl;
+                            } else if (box) {
+                                if (std::find(objectsToRemove.begin(), objectsToRemove.end(), bulletObj) == objectsToRemove.end()) {
+                                    objectsToRemove.push_back(bulletObj);
+                                }
+                                if (std::find(objectsToRemove.begin(), objectsToRemove.end(), hitObj) == objectsToRemove.end()) {
+                                    objectsToRemove.push_back(hitObj);
+                                }
+                                std::cout << "Raycast detected bullet-box collision!" << std::endl;
+                            }
+                        }
+                    }
+                }
+                
+                // Fallback: Direct BodyComponent collision check
+                // This uses BodyComponent positions for more reliable detection
+                if (std::find(objectsToRemove.begin(), objectsToRemove.end(), bulletObj) == objectsToRemove.end()) {
+                    // Get bullet center from BodyComponent
+                    float bulletCenterX = bulletBody->x + bulletBody->width / 2.0f;
+                    float bulletCenterY = bulletBody->y + bulletBody->height / 2.0f;
+                    
+                    for (auto& obj : m_gameObjects) {
+                        if (!obj || obj.get() == bulletObj) continue;
+                        
+                        auto enemy = obj->get<EnemyComponent>();
+                        auto box = obj->get<DestructibleBoxComponent>();
+                        
+                        // Skip if neither enemy nor destructible box
+                        if (!enemy && !box) continue;
+                        
+                        auto targetBody = obj->get<BodyComponent>();
+                        if (!targetBody) continue;
+                        
+                        // Get target center from BodyComponent
+                        float targetCenterX = targetBody->x + targetBody->width / 2.0f;
+                        float targetCenterY = targetBody->y + targetBody->height / 2.0f;
+                        
+                        // Simple distance check (circle-circle collision)
+                        float dx = bulletCenterX - targetCenterX;
+                        float dy = bulletCenterY - targetCenterY;
+                        float distance = std::sqrt(dx * dx + dy * dy);
+                        float bulletRadius = std::max(bulletBody->width, bulletBody->height) / 2.0f;
+                        float targetRadius = std::max(targetBody->width, targetBody->height) / 2.0f;
+                        float collisionDistance = bulletRadius + targetRadius;
+                        
+                        if (distance < collisionDistance) {
+                            // Collision detected!
+                            if (std::find(objectsToRemove.begin(), objectsToRemove.end(), bulletObj) == objectsToRemove.end()) {
+                                objectsToRemove.push_back(bulletObj);
+                            }
+                            if (std::find(objectsToRemove.begin(), objectsToRemove.end(), obj.get()) == objectsToRemove.end()) {
+                                objectsToRemove.push_back(obj.get());
+                            }
+                            if (enemy) {
+                                std::cout << "Direct BodyComponent collision detected: bullet hit enemy at distance " << distance << std::endl;
+                            } else if (box) {
+                                std::cout << "Direct BodyComponent collision detected: bullet hit destructible box at distance " << distance << std::endl;
+                            }
+                            break; // Only hit one target per bullet
+                        }
+                    }
+                }
+            }
+            
+            // Remove collided objects
+            for (auto* obj : objectsToRemove) {
+                auto it = std::find_if(m_gameObjects.begin(), m_gameObjects.end(),
+                    [obj](const std::unique_ptr<GameObject>& gameObj) {
+                        return gameObj.get() == obj;
+                    });
+                
+                if (it != m_gameObjects.end()) {
+                    // Remove from bullet list if it's a bullet
+                    if (obj->get<BulletComponent>()) {
+                        m_bullets.erase(std::remove(m_bullets.begin(), m_bullets.end(), obj), m_bullets.end());
+                    }
+                    
+                    m_gameObjects.erase(it);
+                }
+            }
+        }
+        
         std::vector<std::unique_ptr<GameObject>> m_gameObjects;
+        
+        // Box2D Demo member variables
+        std::vector<GameObject*> m_dynamicBodies;
+        std::vector<GameObject*> m_bullets;
+        bool m_showRaycast = false;
+        bool m_showAABB = false;
+        b2Vec2 m_lastRaycastStart;
+        b2Vec2 m_lastRaycastEnd;
+        b2AABB m_lastAABB;
+        float m_raycastTimer = 0.0f;
+        float m_aabbTimer = 0.0f;
     };
 
 // ========================
