@@ -14,6 +14,8 @@
 #include <string>
 #include <sstream>
 #include <box2d/box2d.h>
+#include <tinyxml2.h>
+#include <ctime>
 
 // ========================
 // Forward Declarations
@@ -2116,7 +2118,40 @@ class Game {
                     if(event.type == SDL_QUIT) {
                         running = false;
                     }
-                    // You can add more event handling here if needed
+                    
+                    // Handle text input for initials entry
+                    if(m_enteringInitials && m_textInputActive) {
+                        if(event.type == SDL_TEXTINPUT) {
+                            // Only accept alphabetic characters
+                            char c = event.text.text[0];
+                            if((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+                                if(m_playerInitials.length() < 3) {
+                                    // Convert to uppercase
+                                    if(c >= 'a' && c <= 'z') {
+                                        c = c - 'a' + 'A';
+                                    }
+                                    m_playerInitials += c;
+                                }
+                            }
+                        } else if(event.type == SDL_KEYDOWN) {
+                            if(event.key.keysym.sym == SDLK_BACKSPACE) {
+                                if(m_playerInitials.length() > 0) {
+                                    m_playerInitials.pop_back();
+                                }
+                            } else if(event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_KP_ENTER) {
+                                // Submit if at least 1 character
+                                if(m_playerInitials.length() >= 1) {
+                                    saveScoreToXML(m_playerInitials, m_score);
+                                    m_textInputActive = false;
+                                    m_enteringInitials = false;
+                                    SDL_StopTextInput();
+                                    
+                                    // Reset game
+                                    resetGame();
+                                }
+                            }
+                        }
+                    }
                 }
                 
                 InputSystem::getInstance().update();
@@ -2148,6 +2183,11 @@ class Game {
         
     private:
         void update(float deltaTime) {
+            // Don't update game logic if entering initials
+            if(m_enteringInitials) {
+                return;
+            }
+            
             // Update Box2D physics world first
             Box2DWorld::getInstance().update(deltaTime);
             
@@ -2231,6 +2271,11 @@ class Game {
             // Render score in top left corner
             renderScore(renderer);
             
+            // Render initials entry screen if active
+            if(m_enteringInitials) {
+                renderInitialsEntry(renderer);
+            }
+            
             SDL_RenderPresent(renderer);
         }
         
@@ -2302,9 +2347,14 @@ class Game {
                         std::cout << "Player died by enemy collision!" << std::endl;
                         playerController->die();
                         
-                        // Pause background music for 3 seconds
-                        SoundManager::getInstance().pauseMusic();
-                        m_musicPauseTimer = 3.0f;
+                        // Stop background music
+                        SoundManager::getInstance().stopMusic();
+                        
+                        // Show initials entry screen
+                        m_enteringInitials = true;
+                        m_playerInitials = "";
+                        m_textInputActive = true;
+                        SDL_StartTextInput();
                         
                         return; // Stop checking other collisions
                     }
@@ -2477,6 +2527,136 @@ class Game {
             // Clean up
             SDL_DestroyTexture(textTexture);
             SDL_FreeSurface(textSurface);
+        }
+        
+        void renderInitialsEntry(SDL_Renderer* renderer) {
+            if (!m_font) return;
+            
+            int screenWidth = 800;
+            int screenHeight = 600;
+            
+            // Draw semi-transparent overlay
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180); // Semi-transparent black
+            SDL_Rect overlay = {0, 0, screenWidth, screenHeight};
+            SDL_RenderFillRect(renderer, &overlay);
+            
+            // Render prompt text
+            SDL_Color textColor = {255, 255, 255, 255}; // White
+            std::string promptText = "Enter Initials to Save Score";
+            SDL_Surface* promptSurface = TTF_RenderText_Solid(m_font, promptText.c_str(), textColor);
+            if (promptSurface) {
+                SDL_Texture* promptTexture = SDL_CreateTextureFromSurface(renderer, promptSurface);
+                if (promptTexture) {
+                    int promptX = (screenWidth - promptSurface->w) / 2;
+                    int promptY = screenHeight / 2 - 80;
+                    SDL_Rect promptRect = {promptX, promptY, promptSurface->w, promptSurface->h};
+                    SDL_RenderCopy(renderer, promptTexture, NULL, &promptRect);
+                    SDL_DestroyTexture(promptTexture);
+                }
+                SDL_FreeSurface(promptSurface);
+            }
+            
+            // Render initials input field
+            std::string displayText = "";
+            for (int i = 0; i < 3; i++) {
+                if (i < static_cast<int>(m_playerInitials.length())) {
+                    displayText += m_playerInitials[i];
+                } else {
+                    displayText += "_";
+                }
+                if (i < 2) {
+                    displayText += " ";
+                }
+            }
+            
+            SDL_Surface* initialsSurface = TTF_RenderText_Solid(m_font, displayText.c_str(), textColor);
+            if (initialsSurface) {
+                SDL_Texture* initialsTexture = SDL_CreateTextureFromSurface(renderer, initialsSurface);
+                if (initialsTexture) {
+                    int initialsX = (screenWidth - initialsSurface->w) / 2;
+                    int initialsY = screenHeight / 2 - 20;
+                    SDL_Rect initialsRect = {initialsX, initialsY, initialsSurface->w, initialsSurface->h};
+                    SDL_RenderCopy(renderer, initialsTexture, NULL, &initialsRect);
+                    SDL_DestroyTexture(initialsTexture);
+                }
+                SDL_FreeSurface(initialsSurface);
+            }
+            
+            // Render instruction text
+            std::string instructionText = "Press ENTER to submit (min 1 char)";
+            SDL_Surface* instructionSurface = TTF_RenderText_Solid(m_font, instructionText.c_str(), textColor);
+            if (instructionSurface) {
+                SDL_Texture* instructionTexture = SDL_CreateTextureFromSurface(renderer, instructionSurface);
+                if (instructionTexture) {
+                    int instructionX = (screenWidth - instructionSurface->w) / 2;
+                    int instructionY = screenHeight / 2 + 40;
+                    SDL_Rect instructionRect = {instructionX, instructionY, instructionSurface->w, instructionSurface->h};
+                    SDL_RenderCopy(renderer, instructionTexture, NULL, &instructionRect);
+                    SDL_DestroyTexture(instructionTexture);
+                }
+                SDL_FreeSurface(instructionSurface);
+            }
+        }
+        
+        void saveScoreToXML(const std::string& initials, int score) {
+            using namespace tinyxml2;
+            
+            XMLDocument doc;
+            std::string filename = "scores.xml";
+            
+            // Try to load existing file
+            if (doc.LoadFile(filename.c_str()) == XML_SUCCESS) {
+                // File exists, add new entry
+            } else {
+                // File doesn't exist, create new
+                XMLElement* root = doc.NewElement("HighScores");
+                doc.InsertFirstChild(root);
+            }
+            
+            XMLElement* root = doc.FirstChildElement("HighScores");
+            if (!root) {
+                root = doc.NewElement("HighScores");
+                doc.InsertFirstChild(root);
+            }
+            
+            // Create new score entry
+            XMLElement* scoreEntry = doc.NewElement("Score");
+            scoreEntry->SetAttribute("initials", initials.c_str());
+            scoreEntry->SetAttribute("value", score);
+            
+            // Add timestamp
+            time_t now = time(0);
+            char* dt = ctime(&now);
+            std::string timeStr(dt);
+            timeStr.pop_back(); // Remove newline
+            scoreEntry->SetAttribute("date", timeStr.c_str());
+            
+            root->InsertEndChild(scoreEntry);
+            
+            // Save file
+            if (doc.SaveFile(filename.c_str()) == XML_SUCCESS) {
+                std::cout << "Score saved: " << initials << " - " << score << std::endl;
+            } else {
+                std::cerr << "Failed to save score to XML" << std::endl;
+            }
+        }
+        
+        void resetGame() {
+            // Reset score
+            m_score = 0;
+            
+            // Reset player
+            auto playerObj = findPlayer();
+            if (playerObj) {
+                auto playerController = playerObj->get<ControllerComponent>();
+                if (playerController) {
+                    playerController->respawn();
+                }
+            }
+            
+            // Restart music
+            SoundManager::getInstance().playMusic();
         }
         
         // ========================
@@ -3395,6 +3575,11 @@ class Game {
         float m_musicPauseTimer = 0.0f; // Timer for music pause after death (3 seconds)
         int m_score = 0; // Player score
         TTF_Font* m_font = nullptr; // Font for rendering score
+        
+        // Initials entry system
+        bool m_enteringInitials = false;
+        std::string m_playerInitials = "";
+        bool m_textInputActive = false;
     };
 
 // ========================
