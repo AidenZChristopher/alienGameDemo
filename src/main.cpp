@@ -1541,18 +1541,22 @@ public:
         auto body = parent().get<BodyComponent>();
         if(!body) return;
         
-        // Store previous position for velocity calculation
-        body->prevX = body->x;
+        // Get Box2D physics component if it exists
+        auto physics = parent().get<Box2DPhysicsComponent>();
         
-        // Only handle horizontal movement 
-        float movement = movingRight ? speed * dt : -speed * dt;
-        body->x += movement;
-        
+        // Check boundaries and update direction
         if(body->x >= rightBound - body->width) movingRight = false;
         if(body->x <= leftBound) movingRight = true;
         
-        // Calculate actual velocity based on movement
-        body->velocityX = (body->x - body->prevX) / dt;
+        // Calculate velocity (in world units per second)
+        float velocityX = movingRight ? speed : -speed;
+        body->velocityX = velocityX;
+        
+        // If we have Box2D physics, set the body's linear velocity
+        if(physics && IsValid(physics->getBodyId())) {
+            b2Vec2 currentVel = b2Body_GetLinearVelocity(physics->getBodyId());
+            b2Body_SetLinearVelocity(physics->getBodyId(), b2Vec2{velocityX / 100.0f, currentVel.y}); // Convert to Box2D units
+        }
     }
     
     void draw(SDL_Renderer* renderer, const View& view) override {}
@@ -1924,8 +1928,14 @@ class XMLParser {
             obj->add<EnemyComponent>();
             
             // Add Box2D physics component to enemies
+            // Patrolling enemies (type="enemy") use KINEMATIC to prevent falling
+            // Flying enemies (type="flying_enemy") use DYNAMIC to allow gravity/bouncing
+            Box2DPhysicsComponent::BodyType bodyType = (type == "enemy") ? 
+                Box2DPhysicsComponent::KINEMATIC : 
+                Box2DPhysicsComponent::DYNAMIC;
+            
             auto enemyPhysics = obj->add<Box2DPhysicsComponent>(
-                Box2DPhysicsComponent::DYNAMIC,
+                bodyType,
                 1.0f,  // density
                 0.3f,  // friction
                 0.3f   // restitution
@@ -1954,14 +1964,28 @@ class XMLParser {
             
             // Enemy behavior
             if (type == "enemy") {
-                float left = std::stof(attrs.at("left"));
-                float right = std::stof(attrs.at("right"));
-                float speed = std::stof(attrs.at("speed"));
-                obj->add<PatrolBehaviorComponent>(left, right, speed);
+                // Only add PatrolBehaviorComponent if the attributes exist
+                if (attrs.find("left") != attrs.end() && 
+                    attrs.find("right") != attrs.end() && 
+                    attrs.find("speed") != attrs.end()) {
+                    float left = std::stof(attrs.at("left"));
+                    float right = std::stof(attrs.at("right"));
+                    float speed = std::stof(attrs.at("speed"));
+                    obj->add<PatrolBehaviorComponent>(left, right, speed);
+                    std::cout << "Added PatrolBehaviorComponent: left=" << left << ", right=" << right << ", speed=" << speed << std::endl;
+                } else {
+                    std::cerr << "Warning: Enemy at (" << x << "," << y << ") missing PatrolBehaviorComponent attributes" << std::endl;
+                }
             } else if (type == "flying_enemy") {
-                float amplitude = std::stof(attrs.at("amplitude"));
-                float frequency = std::stof(attrs.at("frequency"));
-                obj->add<BounceBehaviorComponent>(amplitude, frequency);
+                // Only add BounceBehaviorComponent if the attributes exist
+                if (attrs.find("amplitude") != attrs.end() && 
+                    attrs.find("frequency") != attrs.end()) {
+                    float amplitude = std::stof(attrs.at("amplitude"));
+                    float frequency = std::stof(attrs.at("frequency"));
+                    obj->add<BounceBehaviorComponent>(amplitude, frequency);
+                } else {
+                    std::cerr << "Warning: Flying enemy at (" << x << "," << y << ") missing BounceBehaviorComponent attributes" << std::endl;
+                }
             }
         }
         else if (type == "tiling_background") {
@@ -2227,6 +2251,39 @@ class Game {
             // Don't update game logic if entering initials or showing high scores
             if(m_enteringInitials || m_showingHighScores) {
                 return;
+            }
+            
+            // Check for 'R' key to restart (kill player)
+            auto& input = InputSystem::getInstance();
+            if (input.isKeyJustPressed(SDL_SCANCODE_R)) {
+                auto playerObj = findPlayer();
+                if (playerObj) {
+                    auto playerController = playerObj->get<ControllerComponent>();
+                    auto playerPhysics = playerObj->get<Box2DPhysicsComponent>();
+                    
+                    if (playerController && !playerController->isDead()) {
+                        std::cout << "Player restarted by pressing 'R' key" << std::endl;
+                        
+                        // Stop the physics body immediately
+                        if (playerPhysics) {
+                            playerPhysics->stopBody();
+                        }
+                        
+                        // Kill the player
+                        playerController->die();
+                        
+                        // Stop background music
+                        SoundManager::getInstance().stopMusic();
+                        
+                        // Show initials entry screen
+                        m_enteringInitials = true;
+                        m_playerInitials = "";
+                        m_textInputActive = true;
+                        SDL_StartTextInput();
+                        resetGameObjects(); // Reset all game objects
+                        return; // Don't continue with other updates
+                    }
+                }
             }
             
             // Update Box2D physics world first
