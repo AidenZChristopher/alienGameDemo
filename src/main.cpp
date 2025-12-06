@@ -1,5 +1,6 @@
 #include <SDL.h>
 #include <SDL_mixer.h>
+#include <SDL_ttf.h>
 #include <iostream>
 #include <vector>
 #include <memory>
@@ -336,6 +337,12 @@ class Engine {
             // Initialize SDL_mixer
             if(Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0) {
                 std::cerr << "SDL_mixer initialization failed: " << Mix_GetError() << std::endl;
+                return false;
+            }
+            
+            // Initialize SDL_ttf
+            if(TTF_Init() == -1) {
+                std::cerr << "SDL_ttf initialization failed: " << TTF_GetError() << std::endl;
                 return false;
             }
             
@@ -2048,6 +2055,17 @@ class Game {
             }
             soundManager.playMusic(-1); // Play in infinite loop
             
+            // Load font for score display (try to use a default system font or create a simple one)
+            // On Windows, try common font paths
+            m_font = TTF_OpenFont("C:/Windows/Fonts/arial.ttf", 24);
+            if (!m_font) {
+                m_font = TTF_OpenFont("C:/Windows/Fonts/calibri.ttf", 24);
+            }
+            if (!m_font) {
+                // If no system font found, we'll render without font (use simple text rendering)
+                std::cerr << "Warning: Could not load font for score display. Score will not be visible." << std::endl;
+            }
+            
             std::cout << "=== GAME INITIALIZATION COMPLETE ===" << std::endl;
             std::cout << "Controls:" << std::endl;
             std::cout << "WASD - Move player (W=Jump, A=Left, D=Right)" << std::endl;
@@ -2098,6 +2116,10 @@ class Game {
             m_gameObjects.clear();
             TextureManager::getInstance().cleanup();
             SoundManager::getInstance().cleanup();
+            if (m_font) {
+                TTF_CloseFont(m_font);
+                m_font = nullptr;
+            }
             Engine::getInstance().shutdown();
         }
         
@@ -2182,6 +2204,9 @@ class Game {
             
             // Optional: Render debug information
             renderDebugInfo(renderer);
+            
+            // Render score in top left corner
+            renderScore(renderer);
             
             SDL_RenderPresent(renderer);
         }
@@ -2396,6 +2421,39 @@ class Game {
                     }
                 }
             }
+        }
+        
+        void renderScore(SDL_Renderer* renderer) {
+            if (!m_font) return; // Can't render without font
+            
+            // Create score text
+            std::string scoreText = "Score: " + std::to_string(m_score);
+            
+            // Create surface from text
+            SDL_Color textColor = {255, 255, 255, 255}; // White text
+            SDL_Surface* textSurface = TTF_RenderText_Solid(m_font, scoreText.c_str(), textColor);
+            if (!textSurface) {
+                return; // Failed to create text surface
+            }
+            
+            // Create texture from surface
+            SDL_Texture* textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
+            if (!textTexture) {
+                SDL_FreeSurface(textSurface);
+                return; // Failed to create texture
+            }
+            
+            // Get text dimensions
+            int textWidth = textSurface->w;
+            int textHeight = textSurface->h;
+            
+            // Render in top left corner (screen coordinates, not world coordinates)
+            SDL_Rect destRect = {10, 10, textWidth, textHeight}; // 10 pixels from top-left
+            SDL_RenderCopy(renderer, textTexture, NULL, &destRect);
+            
+            // Clean up
+            SDL_DestroyTexture(textTexture);
+            SDL_FreeSurface(textSurface);
         }
         
         // ========================
@@ -3074,7 +3132,9 @@ class Game {
                 if (bullet && enemy) {
                     objectsToRemove.push_back(objA); // Bullet
                     objectsToRemove.push_back(objB); // Enemy
-                    std::cout << "Bullet hit enemy!" << std::endl;
+                    // Award points for killing enemy
+                    m_score += 10;
+                    std::cout << "Bullet hit enemy! Score: " << m_score << std::endl;
                     continue;
                 }
                 
@@ -3093,7 +3153,9 @@ class Game {
                 if (bullet && enemy) {
                     objectsToRemove.push_back(objA); // Enemy
                     objectsToRemove.push_back(objB); // Bullet
-                    std::cout << "Bullet hit enemy!" << std::endl;
+                    // Award points for killing enemy
+                    m_score += 10;
+                    std::cout << "Bullet hit enemy! Score: " << m_score << std::endl;
                     continue;
                 }
                 
@@ -3159,7 +3221,9 @@ class Game {
                             if (std::find(objectsToRemove.begin(), objectsToRemove.end(), hitObj) == objectsToRemove.end()) {
                                 objectsToRemove.push_back(hitObj);
                             }
-                            std::cout << "AABB query detected bullet-enemy collision!" << std::endl;
+                            // Award points for killing enemy
+                            m_score += 10;
+                            std::cout << "AABB query detected bullet-enemy collision! Score: " << m_score << std::endl;
                             break; // Only hit one enemy per bullet
                         } else if (box) {
                             // Found collision with destructible box!
@@ -3254,7 +3318,9 @@ class Game {
                                 objectsToRemove.push_back(obj.get());
                             }
                             if (enemy) {
-                                std::cout << "Direct BodyComponent collision detected: bullet hit enemy at distance " << distance << std::endl;
+                                // Award points for killing enemy
+                                m_score += 10;
+                                std::cout << "Direct BodyComponent collision detected: bullet hit enemy at distance " << distance << " Score: " << m_score << std::endl;
                             } else if (box) {
                                 std::cout << "Direct BodyComponent collision detected: bullet hit destructible box at distance " << distance << std::endl;
                             }
@@ -3297,6 +3363,8 @@ class Game {
         float m_playerShootTimer = 0.0f; // Timer for shooting animation
         float m_lastShootDirection = 1.0f; // Last shooting direction (1.0 = right, -1.0 = left)
         float m_musicPauseTimer = 0.0f; // Timer for music pause after death (3 seconds)
+        int m_score = 0; // Player score
+        TTF_Font* m_font = nullptr; // Font for rendering score
     };
 
 // ========================
