@@ -119,6 +119,21 @@
         <SolidComponent />
     </GameObject>
 
+    <!-- Platform 14 - Long platform with destructible boxes (player must shoot through) -->
+    <GameObject type="platform">
+        <BodyComponent x="6200" y="500" width="1200" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="3" tileY="3" tileWidth="16" tileHeight="16" />
+        <SolidComponent />
+    </GameObject>
+
+    <!-- Enemy patrolling between first and middle box on platform 14 (50px away from boxes to prevent getting stuck) -->
+    <GameObject type="enemy">
+        <BodyComponent x="6350" y="442" width="83" height="64" />
+        <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="8" />
+        <PatrolBehaviorComponent left="6350" right="6750" speed="90" />
+        <EnemyComponent />
+    </GameObject>
+
     <!-- Patrolling Enemies (Horizontal) -->
     <GameObject type="enemy">
         <BodyComponent x="1600" y="442" width="83" height="64" />

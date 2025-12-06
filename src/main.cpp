@@ -2087,6 +2087,12 @@ class Game {
             // Place it at position (200, 470) - on top of the first platform
             createDestructibleBox(200, 470, 40, 40);
             
+            // Create destructible boxes on the long platform (platform at x=6200, y=500, width=800)
+            // Player must shoot through these boxes to progress
+            // Only create first, middle, and last box with increased spacing
+            std::vector<float> boxPositions = {6300.0f, 6800.0f, 7300.0f}; // First, middle, end positions (500px spacing)
+            createDestructibleBoxesAtPositions(500, 40, 40, boxPositions);
+            
             // Create kill zone at Y=3000 (transparent box that kills player on contact)
             createKillZone(0, 3000, 10000, 100); // Wide box spanning the level (taller to prevent tunneling)
             
@@ -2135,6 +2141,11 @@ class Game {
                 
                 // Input handling
                 while(SDL_PollEvent(&event)) {
+                    // Safety check: skip invalid events
+                    if(event.type == SDL_FIRSTEVENT || event.type >= SDL_LASTEVENT) {
+                        continue;
+                    }
+                    
                     if(event.type == SDL_QUIT) {
                         running = false;
                     }
@@ -3343,6 +3354,24 @@ class Game {
             m_gameObjects.push_back(std::move(box2));
         }
         
+        void createDestructibleBoxesOnPlatform(float platformX, float platformY, float platformWidth, int numBoxes, float boxWidth, float boxHeight) {
+            // Create multiple destructible boxes evenly spaced on a platform
+            float spacing = platformWidth / (numBoxes + 1); // Space between boxes
+            float startX = platformX + spacing;
+            
+            for(int i = 0; i < numBoxes; i++) {
+                float boxX = startX + (i * spacing);
+                createDestructibleBox(boxX, platformY - boxHeight, boxWidth, boxHeight);
+            }
+        }
+        
+        void createDestructibleBoxesAtPositions(float platformY, float boxWidth, float boxHeight, const std::vector<float>& xPositions) {
+            // Create destructible boxes at specific X positions
+            for(float x : xPositions) {
+                createDestructibleBox(x, platformY - boxHeight, boxWidth, boxHeight);
+            }
+        }
+        
         void createKillZone(float x, float y, float width, float height) {
             // Create invisible kill zone that kills player on contact
             auto killZone = std::make_unique<GameObject>();
@@ -3372,6 +3401,10 @@ class Game {
             
             // Recreate destructible boxes and kill zone
             createDestructibleBox(200, 470, 40, 40);
+            // Create destructible boxes on the long platform (platform at x=6200, y=500, width=800)
+            // Only create first, middle, and last box with increased spacing
+            std::vector<float> boxPositions = {6300.0f, 6800.0f, 7300.0f}; // First, middle, end positions (500px spacing)
+            createDestructibleBoxesAtPositions(500, 40, 40, boxPositions);
             createKillZone(0, 3000, 10000, 100);
             
             // Reset player position
@@ -3485,6 +3518,11 @@ class Game {
         }
         
         void handleShooting() {
+            // Don't allow shooting if entering initials or showing high scores
+            if (m_enteringInitials || m_showingHighScores) {
+                return;
+            }
+            
             auto& input = InputSystem::getInstance();
             auto playerObj = findPlayer();
             
@@ -3492,6 +3530,12 @@ class Game {
             
             auto playerBody = playerObj->get<BodyComponent>();
             if (!playerBody) return;
+            
+            // Check if player is dead - don't allow shooting when dead
+            auto playerController = playerObj->get<ControllerComponent>();
+            if (playerController && playerController->isDead()) {
+                return;
+            }
             
             // Check for mouse click or key press to shoot
             static bool mouseWasPressed = false;
@@ -3506,14 +3550,29 @@ class Game {
                 
                 // If using mouse, determine direction based on mouse position relative to player
                 if (mousePressed) {
-                    View& view = Engine::getMainView();
-                    float worldMouseX = view.screenToWorldX(mouseX);
-                    directionX = (worldMouseX > playerBody->x) ? 1.0f : -1.0f;
+                    try {
+                        View& view = Engine::getMainView();
+                        float worldMouseX = view.screenToWorldX(mouseX);
+                        // Validate the coordinate is finite
+                        if (std::isfinite(worldMouseX) && std::isfinite(playerBody->x)) {
+                            directionX = (worldMouseX > playerBody->x) ? 1.0f : -1.0f;
+                        }
+                    } catch (...) {
+                        // If view transformation fails, use default direction
+                        directionX = 1.0f;
+                    }
                 } else {
                     // Use player's velocity to determine facing direction
-                    if (playerBody->velocityX < 0) {
+                    if (std::isfinite(playerBody->velocityX) && playerBody->velocityX < 0) {
                         directionX = -1.0f; // Moving left
                     }
+                }
+                
+                // Validate player position before creating bullet
+                if (!std::isfinite(playerBody->x) || !std::isfinite(playerBody->y)) {
+                    std::cerr << "Warning: Invalid player position, cannot shoot bullet" << std::endl;
+                    mouseWasPressed = mousePressed;
+                    return;
                 }
                 
                 // Get player position - spawn bullet on the side player is facing
@@ -3529,9 +3588,14 @@ class Game {
                     playerBody->x;
                 float bulletY = spriteTopY + gunOffsetFromSpriteTop;
                 
-                shootBullet(bulletX, bulletY, directionX);
-                m_playerShootTimer = 0.3f; // Show shooting animation for 0.3 seconds
-                m_lastShootDirection = directionX; // Store direction for sprite flipping
+                // Validate bullet position before creating
+                if (std::isfinite(bulletX) && std::isfinite(bulletY)) {
+                    shootBullet(bulletX, bulletY, directionX);
+                    m_playerShootTimer = 0.3f; // Show shooting animation for 0.3 seconds
+                    m_lastShootDirection = directionX; // Store direction for sprite flipping
+                } else {
+                    std::cerr << "Warning: Invalid bullet position, cannot shoot" << std::endl;
+                }
             }
             
             mouseWasPressed = mousePressed;
@@ -3598,16 +3662,35 @@ class Game {
             float cameraHalfWidth = 400.0f;  // Half screen width
             float cameraHalfHeight = 300.0f; // Half screen height
             
+            // Validate camera coordinates before creating AABB
+            if (!std::isfinite(cameraCenterX) || !std::isfinite(cameraCenterY)) {
+                std::cerr << "Warning: Invalid camera coordinates, skipping bullet update" << std::endl;
+                return;
+            }
+            
             // Create AABB for camera bounds
             b2AABB cameraBounds;
-            cameraBounds.lowerBound = b2Vec2{
-                (cameraCenterX - cameraHalfWidth - 100.0f) / 100.0f,  // Add margin
-                (cameraCenterY - cameraHalfHeight - 100.0f) / 100.0f
-            };
-            cameraBounds.upperBound = b2Vec2{
-                (cameraCenterX + cameraHalfWidth + 100.0f) / 100.0f,
-                (cameraCenterY + cameraHalfHeight + 100.0f) / 100.0f
-            };
+            float lowerX = (cameraCenterX - cameraHalfWidth - 100.0f) / 100.0f;
+            float lowerY = (cameraCenterY - cameraHalfHeight - 100.0f) / 100.0f;
+            float upperX = (cameraCenterX + cameraHalfWidth + 100.0f) / 100.0f;
+            float upperY = (cameraCenterY + cameraHalfHeight + 100.0f) / 100.0f;
+            
+            // Validate AABB bounds before using them
+            if (!std::isfinite(lowerX) || !std::isfinite(lowerY) || 
+                !std::isfinite(upperX) || !std::isfinite(upperY)) {
+                std::cerr << "Warning: Invalid AABB bounds, skipping bullet update" << std::endl;
+                return;
+            }
+            
+            // Clamp to reasonable values to prevent Box2D assertion errors
+            const float maxCoord = 10000.0f; // Maximum reasonable coordinate
+            lowerX = std::max(-maxCoord, std::min(maxCoord, lowerX));
+            lowerY = std::max(-maxCoord, std::min(maxCoord, lowerY));
+            upperX = std::max(-maxCoord, std::min(maxCoord, upperX));
+            upperY = std::max(-maxCoord, std::min(maxCoord, upperY));
+            
+            cameraBounds.lowerBound = b2Vec2{lowerX, lowerY};
+            cameraBounds.upperBound = b2Vec2{upperX, upperY};
             
             // Use AABB query to find bullets in camera area
             std::vector<b2BodyId> bulletsInView;
