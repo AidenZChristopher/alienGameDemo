@@ -11,8 +11,9 @@
     </GameObject>
 
     <!-- Player with 8x7 grid tilesheet (56 frames total) -->
+    <!-- Sprite rendered at original size 62x50, hitbox is 20% smaller in width and 20% smaller in height (34x40) -->
     <GameObject type="player">
-        <BodyComponent x="100" y="400" width="62" height="50" />
+        <BodyComponent x="100" y="400" width="34" height="40" />
         <SpriteComponent textureKey="player_texture" spriteSheet="true" frameWidth="64" frameHeight="32" totalFrames="56" framesPerRow="8" frameRate="10" />
         <ControllerComponent />
     </GameObject>

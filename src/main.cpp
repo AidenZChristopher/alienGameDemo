@@ -1,4 +1,4 @@
-#include <SDL2/SDL.h>
+#include <SDL.h>
 #include <iostream>
 #include <vector>
 #include <memory>
@@ -902,7 +902,13 @@ class SpriteComponent : public Component {
                 m_texture = TextureManager::getInstance().getTexture(m_textureKey);
             }
             
-            SDL_Rect destRect = view.getTransformedRect(body->x, body->y, body->width, body->height);
+            // Use custom render size if set, otherwise use body dimensions
+            float renderWidth = (m_renderWidth > 0) ? m_renderWidth : body->width;
+            float renderHeight = (m_renderHeight > 0) ? m_renderHeight : body->height;
+            // Apply render offset if set (for centering hitbox within sprite)
+            float renderX = body->x + m_renderOffsetX;
+            float renderY = body->y + m_renderOffsetY;
+            SDL_Rect destRect = view.getTransformedRect(renderX, renderY, renderWidth, renderHeight);
             
             // If we have a texture, use it
             if(m_texture) {
@@ -1101,6 +1107,18 @@ class SpriteComponent : public Component {
             m_animated = false;
         }
         
+        // Set custom render size (overrides body dimensions for rendering only)
+        void setRenderSize(float width, float height) {
+            m_renderWidth = width;
+            m_renderHeight = height;
+        }
+        
+        // Set render offset (adjusts sprite rendering position relative to body)
+        void setRenderOffset(float offsetX, float offsetY) {
+            m_renderOffsetX = offsetX;
+            m_renderOffsetY = offsetY;
+        }
+        
     private:
         std::string m_textureKey;
         SDL_Color m_color;
@@ -1120,6 +1138,14 @@ class SpriteComponent : public Component {
         int m_animationRow = -1;   // Which row to animate (for multi-row sprite sheets)
         int m_framesInRow = 0;     // Number of frames available in the animation row
         bool m_usingCustomSource = false;
+        
+        // Custom render size (0 means use body dimensions)
+        float m_renderWidth = 0.0f;
+        float m_renderHeight = 0.0f;
+        
+        // Render offset (adjusts sprite position relative to body position)
+        float m_renderOffsetX = 0.0f;
+        float m_renderOffsetY = 0.0f;
     };
 
 // ========================
@@ -1587,7 +1613,16 @@ class XMLParser {
             float width = std::stof(attrs.at("width"));
             float height = std::stof(attrs.at("height"));
             
-            obj->add<BodyComponent>(x, y, width, height);
+            // Center the hitbox horizontally and align it to the bottom vertically
+            // Sprite renders at 62x50, hitbox is 34x40 (20% smaller width, 20% smaller height)
+            // Offset: horizontal = (62-34)/2 = 14px right (centered), vertical = 50-40 = 10px down (bottom-aligned)
+            const float spriteRenderWidth = 62.0f;
+            const float spriteRenderHeight = 50.0f;
+            const float hitboxOffsetX = (spriteRenderWidth - width) / 2.0f;  // Center horizontally
+            const float hitboxOffsetY = spriteRenderHeight - height; // Align to bottom (sprite height - hitbox height)
+            
+            // Adjust body position to center the hitbox within the sprite
+            obj->add<BodyComponent>(x + hitboxOffsetX, y + hitboxOffsetY, width, height);
             
             auto sprite = obj->add<SpriteComponent>(attrs.at("textureKey"));
             SDL_Texture* texture = textureManager.getTexture(attrs.at("textureKey"));
@@ -1622,6 +1657,13 @@ class XMLParser {
                     sprite->setAnimationRow(0, framesPerRow);
                     std::cout << "Player sprite initialized with row-based animation (row 0)" << std::endl;
                 }
+                
+                // Set render size to original size (62x50) while hitbox is 20% smaller in width and 10% smaller in height (34x45)
+                sprite->setRenderSize(62.0f, 50.0f);
+                
+                // Offset sprite rendering back to original position to keep sprite visual position unchanged
+                // while hitbox is centered within the sprite
+                sprite->setRenderOffset(-hitboxOffsetX, -hitboxOffsetY);
             }
             
             obj->add<ControllerComponent>();
@@ -2257,14 +2299,14 @@ class Game {
             
             // Tilesheet: 8 columns x 7 rows (56 frames total)
             // Each tile: 64x32 pixels (assuming 512x224 texture: 512/8=64, 224/7=32)
-            // Original tile ratio: 64:32 = 2:1 (width:height)
             const int tileWidth = 64;   // 512 / 8
             const int tileHeight = 32;  // 224 / 7
-            const float originalRatio = static_cast<float>(tileWidth) / static_cast<float>(tileHeight); // 2.0 (2:1 ratio)
             
-            // Keep character height and calculate width to maintain original 2:1 ratio
-            const float playerHeight = 64.0f; // Keep at current height
-            const float playerWidth = playerHeight * originalRatio; // 64 * 2.0 = 128 pixels (maintains 2:1 ratio)
+            // Match hitbox to sprite size
+            const float playerWidth = static_cast<float>(tileWidth);   // 64 pixels (matches sprite frame width)
+            const float playerHeight = static_cast<float>(tileHeight); // 32 pixels (matches sprite frame height)
+            
+            std::cout << "Player hitbox size: " << playerWidth << "x" << playerHeight << " pixels" << std::endl;
             
             player->add<BodyComponent>(playerStartX, playerStartY, playerWidth, playerHeight);
             auto playerSprite = player->add<SpriteComponent>("player_texture");
