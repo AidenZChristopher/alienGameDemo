@@ -62,11 +62,116 @@
         <SolidComponent />
     </GameObject>
 
-    <!-- Patrolling Enemy -->
+    <!-- Platforms with gaps for jumping (starting around x=3600) -->
+    <!-- Platform 6 - First in jumping sequence -->
+    <GameObject type="platform">
+        <BodyComponent x="3600" y="450" width="200" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="4" tileY="3" tileWidth="16" tileHeight="16" />
+        <SolidComponent />
+    </GameObject>
+
+    <!-- Platform 7 - Gap, then second platform -->
+    <GameObject type="platform">
+        <BodyComponent x="3900" y="400" width="200" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="4" tileY="3" tileWidth="16" tileHeight="16" />
+        <SolidComponent />
+    </GameObject>
+
+    <!-- Platform 8 - Gap, then third platform -->
+    <GameObject type="platform">
+        <BodyComponent x="4200" y="350" width="200" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="4" tileY="3" tileWidth="16" tileHeight="16" />
+        <SolidComponent />
+    </GameObject>
+
+    <!-- Platform 9 - Gap, then fourth platform -->
+    <GameObject type="platform">
+        <BodyComponent x="4500" y="300" width="200" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="4" tileY="3" tileWidth="16" tileHeight="16" />
+        <SolidComponent />
+    </GameObject>
+
+    <!-- Platform 10 - Gap, then fifth platform (going back down) -->
+    <GameObject type="platform">
+        <BodyComponent x="4800" y="350" width="200" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="4" tileY="3" tileWidth="16" tileHeight="16" />
+        <SolidComponent />
+    </GameObject>
+
+    <!-- Platform 11 - Gap, then sixth platform -->
+    <GameObject type="platform">
+        <BodyComponent x="5100" y="400" width="200" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="4" tileY="3" tileWidth="16" tileHeight="16" />
+        <SolidComponent />
+    </GameObject>
+
+    <!-- Platform 12 - Gap, then seventh platform -->
+    <GameObject type="platform">
+        <BodyComponent x="5400" y="450" width="200" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="4" tileY="3" tileWidth="16" tileHeight="16" />
+        <SolidComponent />
+    </GameObject>
+
+    <!-- Platform 13 - Final platform in sequence -->
+    <GameObject type="platform">
+        <BodyComponent x="5700" y="500" width="300" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="3" tileY="3" tileWidth="16" tileHeight="16" />
+        <SolidComponent />
+    </GameObject>
+
+    <!-- Patrolling Enemies (Horizontal) -->
     <GameObject type="enemy">
         <BodyComponent x="1600" y="442" width="83" height="64" />
         <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="8" />
         <PatrolBehaviorComponent left="1575" right="1950" speed="100" />
+        <EnemyComponent />
+    </GameObject>
+
+    <!-- Horizontal patrolling enemy on platform 6 -->
+    <GameObject type="enemy">
+        <BodyComponent x="3600" y="386" width="83" height="64" />
+        <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="8" />
+        <PatrolBehaviorComponent left="3600" right="3800" speed="80" />
+        <EnemyComponent />
+    </GameObject>
+
+    <!-- Horizontal patrolling enemy on platform 7 -->
+    <GameObject type="enemy">
+        <BodyComponent x="3900" y="336" width="83" height="64" />
+        <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="8" />
+        <PatrolBehaviorComponent left="3900" right="4100" speed="90" />
+        <EnemyComponent />
+    </GameObject>
+
+    <!-- Horizontal patrolling enemy on platform 8 -->
+    <GameObject type="enemy">
+        <BodyComponent x="4200" y="286" width="83" height="64" />
+        <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="8" />
+        <PatrolBehaviorComponent left="4200" right="4400" speed="85" />
+        <EnemyComponent />
+    </GameObject>
+
+    <!-- Horizontal patrolling enemy on platform 9 -->
+    <GameObject type="enemy">
+        <BodyComponent x="4500" y="236" width="83" height="64" />
+        <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="8" />
+        <PatrolBehaviorComponent left="4500" right="4700" speed="95" />
+        <EnemyComponent />
+    </GameObject>
+
+    <!-- Horizontal patrolling enemy on platform 10 -->
+    <GameObject type="enemy">
+        <BodyComponent x="4800" y="286" width="83" height="64" />
+        <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="8" />
+        <PatrolBehaviorComponent left="4800" right="5000" speed="75" />
+        <EnemyComponent />
+    </GameObject>
+
+    <!-- Horizontal patrolling enemy on platform 11 -->
+    <GameObject type="enemy">
+        <BodyComponent x="5100" y="336" width="83" height="64" />
+        <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="8" />
+        <PatrolBehaviorComponent left="5100" right="5300" speed="100" />
         <EnemyComponent />
     </GameObject>
 
@@ -103,6 +208,56 @@
         <BodyComponent x="3200" y="340" width="83" height="64" />
         <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="10" />
         <BounceBehaviorComponent amplitude="80" frequency="2.5" />
+        <EnemyComponent />
+    </GameObject>
+
+    <!-- Additional vertical bouncing enemies in the jumping section -->
+    <GameObject type="flying_enemy">
+        <BodyComponent x="3700" y="300" width="83" height="64" />
+        <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="10" />
+        <BounceBehaviorComponent amplitude="60" frequency="2.0" />
+        <EnemyComponent />
+    </GameObject>
+
+    <GameObject type="flying_enemy">
+        <BodyComponent x="4000" y="250" width="83" height="64" />
+        <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="10" />
+        <BounceBehaviorComponent amplitude="70" frequency="2.3" />
+        <EnemyComponent />
+    </GameObject>
+
+    <GameObject type="flying_enemy">
+        <BodyComponent x="4300" y="200" width="83" height="64" />
+        <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="10" />
+        <BounceBehaviorComponent amplitude="65" frequency="1.8" />
+        <EnemyComponent />
+    </GameObject>
+
+    <GameObject type="flying_enemy">
+        <BodyComponent x="4600" y="150" width="83" height="64" />
+        <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="10" />
+        <BounceBehaviorComponent amplitude="75" frequency="2.1" />
+        <EnemyComponent />
+    </GameObject>
+
+    <GameObject type="flying_enemy">
+        <BodyComponent x="4900" y="200" width="83" height="64" />
+        <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="10" />
+        <BounceBehaviorComponent amplitude="60" frequency="2.4" />
+        <EnemyComponent />
+    </GameObject>
+
+    <GameObject type="flying_enemy">
+        <BodyComponent x="5200" y="250" width="83" height="64" />
+        <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="10" />
+        <BounceBehaviorComponent amplitude="70" frequency="1.9" />
+        <EnemyComponent />
+    </GameObject>
+
+    <GameObject type="flying_enemy">
+        <BodyComponent x="5500" y="300" width="83" height="64" />
+        <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="10" />
+        <BounceBehaviorComponent amplitude="65" frequency="2.2" />
         <EnemyComponent />
     </GameObject>
 </Level>

@@ -2445,6 +2445,9 @@ class Game {
                         
                         playerController->die();
                         
+                        // Reset all game objects to initial positions
+                        resetGameObjects();
+                        
                         // Stop background music
                         SoundManager::getInstance().stopMusic();
                         
@@ -2473,6 +2476,9 @@ class Game {
                         
                         playerController->die();
                         
+                        // Reset all game objects to initial positions
+                        resetGameObjects();
+                        
                         // Stop background music
                         SoundManager::getInstance().stopMusic();
                         
@@ -2496,6 +2502,9 @@ class Game {
                         }
                         
                         playerController->die();
+                        
+                        // Reset all game objects to initial positions
+                        resetGameObjects();
                         
                         // Stop background music
                         SoundManager::getInstance().stopMusic();
@@ -3346,6 +3355,45 @@ class Game {
             
             m_gameObjects.push_back(std::move(killZone));
             std::cout << "Kill zone created at Y=" << y << " (width=" << width << ", height=" << height << ")" << std::endl;
+        }
+        
+        void resetGameObjects() {
+            // Reset all game objects to their initial positions by reloading from XML
+            std::cout << "Resetting game objects..." << std::endl;
+            
+            // Reload all game objects from XML
+            auto newObjects = XMLComponentFactory::createFromXML(Engine::getRenderer(), "scene.xml");
+            
+            // Clear old objects
+            m_gameObjects.clear();
+            
+            // Add reloaded objects
+            m_gameObjects = std::move(newObjects);
+            
+            // Recreate destructible boxes and kill zone
+            createDestructibleBox(200, 470, 40, 40);
+            createKillZone(0, 3000, 10000, 100);
+            
+            // Reset player position
+            auto player = findPlayer();
+            if(player) {
+                auto body = player->get<BodyComponent>();
+                if(body) {
+                    body->x = 100.0f; // Reset to spawn position
+                    body->y = 400.0f;
+                    body->velocityX = 0.0f;
+                    body->velocityY = 0.0f;
+                    
+                    // Reset physics body
+                    auto physics = player->get<Box2DPhysicsComponent>();
+                    if(physics) {
+                        physics->destroyBody();
+                        physics->createBody(100.0f, 400.0f, body->width, body->height);
+                    }
+                }
+            }
+            
+            std::cout << "Game objects reset complete." << std::endl;
         }
         
         void removeLastDynamicBody() {
