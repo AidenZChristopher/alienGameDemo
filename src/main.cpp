@@ -251,16 +251,72 @@ public:
         }
     }
     
+    // Load background music (MP3, OGG, WAV, etc.)
+    bool loadMusic(const std::string& filePath) {
+        std::cout << "=== LOADING MUSIC ===" << std::endl;
+        std::cout << "File: " << filePath << std::endl;
+        
+        // Free existing music if any
+        if (m_music) {
+            Mix_FreeMusic(m_music);
+            m_music = nullptr;
+        }
+        
+        // Load music
+        m_music = Mix_LoadMUS(filePath.c_str());
+        if(!m_music) {
+            std::cerr << "FAILED to load music: " << filePath << " - " << Mix_GetError() << std::endl;
+            return false;
+        }
+        
+        std::cout << "Music loaded successfully" << std::endl;
+        return true;
+    }
+    
+    // Play background music (loops = -1 for infinite loop)
+    void playMusic(int loops = -1) {
+        if (m_music) {
+            if (Mix_PlayMusic(m_music, loops) == -1) {
+                std::cerr << "Failed to play music: " << Mix_GetError() << std::endl;
+            }
+        }
+    }
+    
+    // Pause music
+    void pauseMusic() {
+        if (Mix_PlayingMusic()) {
+            Mix_PauseMusic();
+        }
+    }
+    
+    // Resume music
+    void resumeMusic() {
+        if (Mix_PausedMusic()) {
+            Mix_ResumeMusic();
+        }
+    }
+    
+    // Stop music
+    void stopMusic() {
+        Mix_HaltMusic();
+    }
+    
     void cleanup() {
         for(auto& pair : m_sounds) {
             Mix_FreeChunk(pair.second);
         }
         m_sounds.clear();
+        
+        if (m_music) {
+            Mix_FreeMusic(m_music);
+            m_music = nullptr;
+        }
     }
     
 private:
     SoundManager() = default;
     std::unordered_map<std::string, Mix_Chunk*> m_sounds;
+    Mix_Music* m_music = nullptr;
 };
 
 class Engine {
@@ -1982,6 +2038,16 @@ class Game {
             // Place it at position (200, 470) - on top of the first platform
             createDestructibleBox(200, 470, 40, 40);
             
+            // Load and play background music
+            auto& soundManager = SoundManager::getInstance();
+            // Try different music formats
+            if (!soundManager.loadMusic("assets/background_music.mp3")) {
+                if (!soundManager.loadMusic("assets/background_music.ogg")) {
+                    soundManager.loadMusic("assets/background_music.wav");
+                }
+            }
+            soundManager.playMusic(-1); // Play in infinite loop
+            
             std::cout << "=== GAME INITIALIZATION COMPLETE ===" << std::endl;
             std::cout << "Controls:" << std::endl;
             std::cout << "WASD - Move player (W=Jump, A=Left, D=Right)" << std::endl;
@@ -2047,6 +2113,15 @@ class Game {
             if (m_playerShootTimer > 0.0f) {
                 m_playerShootTimer -= deltaTime;
                 if (m_playerShootTimer < 0.0f) m_playerShootTimer = 0.0f;
+            }
+            
+            // Update music pause timer (resume music after 3 seconds)
+            if (m_musicPauseTimer > 0.0f) {
+                m_musicPauseTimer -= deltaTime;
+                if (m_musicPauseTimer <= 0.0f) {
+                    m_musicPauseTimer = 0.0f;
+                    SoundManager::getInstance().resumeMusic();
+                }
             }
             
             // Update player animations based on state
@@ -2178,6 +2253,11 @@ class Game {
                     if(otherEnemy) {
                         std::cout << "Player died by enemy collision!" << std::endl;
                         playerController->die();
+                        
+                        // Pause background music for 3 seconds
+                        SoundManager::getInstance().pauseMusic();
+                        m_musicPauseTimer = 3.0f;
+                        
                         return; // Stop checking other collisions
                     }
                     
@@ -2774,7 +2854,7 @@ class Game {
             // Bullet properties
             const float bulletWidth = 8.0f;
             const float bulletHeight = 8.0f;
-            const float bulletSpeed = 600.0f; // pixels per second
+            const float bulletSpeed = 1600.0f; // pixels per second (16 m/s in Box2D)
             
             bullet->add<BodyComponent>(x, y, bulletWidth, bulletHeight);
             
@@ -3216,6 +3296,7 @@ class Game {
         float m_aabbTimer = 0.0f;
         float m_playerShootTimer = 0.0f; // Timer for shooting animation
         float m_lastShootDirection = 1.0f; // Last shooting direction (1.0 = right, -1.0 = left)
+        float m_musicPauseTimer = 0.0f; // Timer for music pause after death (3 seconds)
     };
 
 // ========================
