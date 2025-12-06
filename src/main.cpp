@@ -1,4 +1,5 @@
 #include <SDL.h>
+#include <SDL_mixer.h>
 #include <iostream>
 #include <vector>
 #include <memory>
@@ -203,6 +204,65 @@ private:
     TextureManager() = default;
     std::unordered_map<std::string, SDL_Texture*> m_textures;
 };
+
+// ========================
+// Sound Manager
+// ========================
+class SoundManager {
+public:
+    static SoundManager& getInstance() {
+        static SoundManager instance;
+        return instance;
+    }
+    
+    // Load a sound effect (WAV file)
+    Mix_Chunk* loadSound(const std::string& filePath, const std::string& soundKey) {
+        std::cout << "=== LOADING SOUND ===" << std::endl;
+        std::cout << "File: " << filePath << std::endl;
+        std::cout << "Key: " << soundKey << std::endl;
+        
+        // Remove existing sound if it exists
+        auto it = m_sounds.find(soundKey);
+        if(it != m_sounds.end()) {
+            Mix_FreeChunk(it->second);
+            m_sounds.erase(it);
+            std::cout << "Removed old cached sound: " << soundKey << std::endl;
+        }
+        
+        // Load sound effect
+        Mix_Chunk* sound = Mix_LoadWAV(filePath.c_str());
+        if(!sound) {
+            std::cerr << "FAILED to load WAV: " << filePath << " - " << Mix_GetError() << std::endl;
+            return nullptr;
+        }
+        
+        m_sounds[soundKey] = sound;
+        std::cout << "Sound loaded successfully: " << soundKey << std::endl;
+        return sound;
+    }
+    
+    // Play a sound effect
+    void playSound(const std::string& soundKey, int loops = 0) {
+        auto it = m_sounds.find(soundKey);
+        if(it != m_sounds.end()) {
+            Mix_PlayChannel(-1, it->second, loops); // -1 = use any available channel
+        } else {
+            std::cerr << "Sound not found: " << soundKey << std::endl;
+        }
+    }
+    
+    void cleanup() {
+        for(auto& pair : m_sounds) {
+            Mix_FreeChunk(pair.second);
+        }
+        m_sounds.clear();
+    }
+    
+private:
+    SoundManager() = default;
+    std::unordered_map<std::string, Mix_Chunk*> m_sounds;
+};
+
 class Engine {
     public:
         static Engine& getInstance() {
@@ -212,8 +272,14 @@ class Engine {
         
         bool initialize(const std::string& title, int width, int height) {
             // SDL initialization
-            if(SDL_Init(SDL_INIT_VIDEO) < 0) {
+            if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
                 std::cerr << "SDL initialization failed: " << SDL_GetError() << std::endl;
+                return false;
+            }
+            
+            // Initialize SDL_mixer
+            if(Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0) {
+                std::cerr << "SDL_mixer initialization failed: " << Mix_GetError() << std::endl;
                 return false;
             }
             
@@ -260,6 +326,7 @@ class Engine {
         void shutdown() {
             if(m_renderer) SDL_DestroyRenderer(m_renderer);
             if(m_window) SDL_DestroyWindow(m_window);
+            Mix_CloseAudio();
             SDL_Quit();
         }
         
@@ -949,14 +1016,22 @@ class SpriteComponent : public Component {
                     if (srcH <= 0) srcH = m_spriteHeight;
                     
                     SDL_Rect srcRect = { srcX, srcY, srcW, srcH };
-                    SDL_RenderCopy(renderer, m_texture, &srcRect, &destRect);
+                    if (m_flipHorizontal) {
+                        SDL_RenderCopyEx(renderer, m_texture, &srcRect, &destRect, 0.0, NULL, SDL_FLIP_HORIZONTAL);
+                    } else {
+                        SDL_RenderCopy(renderer, m_texture, &srcRect, &destRect);
+                    }
                 }
                 // For animated sprite sheets (characters, enemies)
                 else if(m_usingSpriteSheet && m_animated) {
                     // Ensure sprite dimensions are valid
                     if (m_spriteWidth <= 0 || m_spriteHeight <= 0) {
                         // Fallback to rendering entire texture if dimensions not set
-                        SDL_RenderCopy(renderer, m_texture, NULL, &destRect);
+                        if (m_flipHorizontal) {
+                            SDL_RenderCopyEx(renderer, m_texture, NULL, &destRect, 0.0, NULL, SDL_FLIP_HORIZONTAL);
+                        } else {
+                            SDL_RenderCopy(renderer, m_texture, NULL, &destRect);
+                        }
                         return;
                     }
                     
@@ -1010,11 +1085,19 @@ class SpriteComponent : public Component {
                     if (srcH <= 0) srcH = m_spriteHeight;
                     
                     SDL_Rect srcRect = { srcX, srcY, srcW, srcH };
-                    SDL_RenderCopy(renderer, m_texture, &srcRect, &destRect);
+                    if (m_flipHorizontal) {
+                        SDL_RenderCopyEx(renderer, m_texture, &srcRect, &destRect, 0.0, NULL, SDL_FLIP_HORIZONTAL);
+                    } else {
+                        SDL_RenderCopy(renderer, m_texture, &srcRect, &destRect);
+                    }
                 }
                 // For static textures (stretched to fit)
                 else {
-                    SDL_RenderCopy(renderer, m_texture, NULL, &destRect);
+                    if (m_flipHorizontal) {
+                        SDL_RenderCopyEx(renderer, m_texture, NULL, &destRect, 0.0, NULL, SDL_FLIP_HORIZONTAL);
+                    } else {
+                        SDL_RenderCopy(renderer, m_texture, NULL, &destRect);
+                    }
                 }
             } 
             // Otherwise fall back to colored rectangles
@@ -1119,6 +1202,15 @@ class SpriteComponent : public Component {
             m_renderOffsetY = offsetY;
         }
         
+        // Set horizontal flip
+        void setFlipHorizontal(bool flip) {
+            m_flipHorizontal = flip;
+        }
+        
+        bool getFlipHorizontal() const {
+            return m_flipHorizontal;
+        }
+        
     private:
         std::string m_textureKey;
         SDL_Color m_color;
@@ -1146,6 +1238,9 @@ class SpriteComponent : public Component {
         // Render offset (adjusts sprite position relative to body position)
         float m_renderOffsetX = 0.0f;
         float m_renderOffsetY = 0.0f;
+        
+        // Flip flag for horizontal flipping
+        bool m_flipHorizontal = false;
     };
 
 // ========================
@@ -1559,6 +1654,7 @@ class XMLParser {
                 currentAttributes["frameWidth"] = extractAttribute(completeTag, "frameWidth");
                 currentAttributes["frameHeight"] = extractAttribute(completeTag, "frameHeight");
                 currentAttributes["totalFrames"] = extractAttribute(completeTag, "totalFrames");
+                currentAttributes["framesPerRow"] = extractAttribute(completeTag, "framesPerRow");
                 currentAttributes["frameRate"] = extractAttribute(completeTag, "frameRate");
                 currentAttributes["color"] = extractAttribute(completeTag, "color");
                 // Add tile attributes
@@ -1803,6 +1899,10 @@ public:
         // Load textures first from the XML
         loadTexturesFromXML(renderer, filename);
         
+        // Load sound effects
+        auto& soundManager = SoundManager::getInstance();
+        soundManager.loadSound("assets/shoot.wav", "shoot_sound");
+        
         // Parse the XML file to create game objects
         gameObjects = XMLParser::parseXML(renderer, filename);
         
@@ -1931,6 +2031,7 @@ class Game {
             Box2DWorld::getInstance().shutdown();
             m_gameObjects.clear();
             TextureManager::getInstance().cleanup();
+            SoundManager::getInstance().cleanup();
             Engine::getInstance().shutdown();
         }
         
@@ -2702,6 +2803,9 @@ class Game {
             m_gameObjects.push_back(std::move(bullet));
             m_bullets.push_back(m_gameObjects.back().get());
             
+            // Play shoot sound effect
+            SoundManager::getInstance().playSound("shoot_sound");
+            
             std::cout << "Bullet shot at (" << x << ", " << y << ") direction: " << directionX << std::endl;
         }
         
@@ -2745,6 +2849,7 @@ class Game {
                 
                 shootBullet(bulletX, bulletY, directionX);
                 m_playerShootTimer = 0.3f; // Show shooting animation for 0.3 seconds
+                m_lastShootDirection = directionX; // Store direction for sprite flipping
             }
             
             mouseWasPressed = mousePressed;
@@ -2759,6 +2864,29 @@ class Game {
             
             auto playerController = playerObj->get<ControllerComponent>();
             if (!playerController) return;
+            
+            auto playerBody = playerObj->get<BodyComponent>();
+            if (!playerBody) return;
+            
+            // Determine facing direction based on movement or shooting
+            bool facingLeft = false;
+            
+            // Check if shooting - use last shoot direction
+            if (m_playerShootTimer > 0.0f && m_lastShootDirection != 0.0f) {
+                facingLeft = (m_lastShootDirection < 0.0f);
+            } else {
+                // Check movement direction
+                auto physics = playerObj->get<Box2DPhysicsComponent>();
+                if (physics && IsValid(physics->getBodyId())) {
+                    b2Vec2 vel = b2Body_GetLinearVelocity(physics->getBodyId());
+                    facingLeft = (vel.x < -0.1f); // Moving left
+                } else if (playerBody->velocityX < -0.1f) {
+                    facingLeft = true; // Moving left
+                }
+            }
+            
+            // Set flip flag (flip when facing left)
+            playerSprite->setFlipHorizontal(facingLeft);
             
             // Determine animation state: shooting > running > idle
             int newAnimationRow = 0;
@@ -3087,6 +3215,7 @@ class Game {
         float m_raycastTimer = 0.0f;
         float m_aabbTimer = 0.0f;
         float m_playerShootTimer = 0.0f; // Timer for shooting animation
+        float m_lastShootDirection = 1.0f; // Last shooting direction (1.0 = right, -1.0 = left)
     };
 
 // ========================
