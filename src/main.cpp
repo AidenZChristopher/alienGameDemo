@@ -681,6 +681,13 @@ private:
 // ========================
 // Tiling Background Component
 // ========================
+class KillZoneComponent : public Component {
+public:
+    KillZoneComponent() = default;
+    void update(float dt) override {}
+    void draw(SDL_Renderer* renderer, const View& view) override {} // Invisible, no drawing
+};
+
 class TilingBackgroundComponent : public Component {
     public:
         TilingBackgroundComponent(const std::string& textureKey, float scrollSpeedX = 0.0f, float scrollSpeedY = 0.0f) 
@@ -936,6 +943,13 @@ public:
     
     // Get body ID
     b2BodyId getBodyId() const { return m_bodyId; }
+    
+    // Stop the body (set velocity to zero)
+    void stopBody() {
+        if (!IsValid(m_bodyId)) return;
+        b2Body_SetLinearVelocity(m_bodyId, b2Vec2{0, 0});
+        b2Body_SetAngularVelocity(m_bodyId, 0);
+    }
     
     // Check if body is awake
     bool isAwake() const {
@@ -1449,9 +1463,12 @@ public:
         m_grounded = false;
         m_onPlatform = false;
         
-        // Check for death by falling
+        // Check for death by falling - but don't respawn here
+        // The Game class will handle death and initials entry
+        // This check is kept for backwards compatibility but won't auto-respawn
         if(body->y > deathHeight) {
-            respawn();
+            // Mark as dead, but don't respawn - let Game class handle it
+            m_isDead = true;
         }
     }
     
@@ -1507,7 +1524,7 @@ private:
     float speed = 300.0f;
     float jumpForce = 275.0f;
     float gravity = 900.0f;
-    float deathHeight = 800.0f;
+    float deathHeight = 3000.0f;
     bool m_grounded = false;
     bool m_onPlatform = false;
     bool m_isDead = false;
@@ -2070,6 +2087,9 @@ class Game {
             // Place it at position (200, 470) - on top of the first platform
             createDestructibleBox(200, 470, 40, 40);
             
+            // Create kill zone at Y=3000 (transparent box that kills player on contact)
+            createKillZone(0, 3000, 10000, 100); // Wide box spanning the level (taller to prevent tunneling)
+            
             // Load and play background music
             auto& soundManager = SoundManager::getInstance();
             // Try different music formats
@@ -2119,6 +2139,16 @@ class Game {
                         running = false;
                     }
                     
+                    // Handle high scores screen (press enter to continue)
+                    if(m_showingHighScores) {
+                        if(event.type == SDL_KEYDOWN) {
+                            if(event.key.keysym.sym == SDLK_RETURN || event.key.keysym.sym == SDLK_KP_ENTER) {
+                                m_showingHighScores = false;
+                                resetGame();
+                            }
+                        }
+                    }
+                    
                     // Handle text input for initials entry
                     if(m_enteringInitials && m_textInputActive) {
                         if(event.type == SDL_TEXTINPUT) {
@@ -2146,8 +2176,8 @@ class Game {
                                     m_enteringInitials = false;
                                     SDL_StopTextInput();
                                     
-                                    // Reset game
-                                    resetGame();
+                                    // Show high scores
+                                    m_showingHighScores = true;
                                 }
                             }
                         }
@@ -2183,8 +2213,8 @@ class Game {
         
     private:
         void update(float deltaTime) {
-            // Don't update game logic if entering initials
-            if(m_enteringInitials) {
+            // Don't update game logic if entering initials or showing high scores
+            if(m_enteringInitials || m_showingHighScores) {
                 return;
             }
             
@@ -2219,6 +2249,43 @@ class Game {
                 }
             }
             
+            // Check for falling death AFTER GameObject update (to catch any falling)
+            auto playerObj = findPlayer();
+            if (playerObj) {
+                auto playerBody = playerObj->get<BodyComponent>();
+                auto playerController = playerObj->get<ControllerComponent>();
+                if (playerBody && playerController && !playerController->isDead()) {
+                    // Debug: print player Y position periodically
+                    static int debugCounter = 0;
+                    if (++debugCounter % 60 == 0) { // Print every 60 frames (~1 second)
+                        std::cout << "DEBUG: Player Y position: " << playerBody->y << std::endl;
+                    }
+                    
+                    // Check if player fell off the map (deathHeight = 3000.0f)
+                    if (playerBody->y > 3000.0f) {
+                        std::cout << "Player died by falling off the map! Y position: " << playerBody->y << std::endl;
+                        
+                        // Stop the physics body immediately to prevent infinite falling
+                        auto playerPhysics = playerObj->get<Box2DPhysicsComponent>();
+                        if (playerPhysics) {
+                            playerPhysics->stopBody();
+                        }
+                        
+                        playerController->die();
+                        
+                        // Stop background music
+                        SoundManager::getInstance().stopMusic();
+                        
+                        // Show initials entry screen
+                        m_enteringInitials = true;
+                        m_playerInitials = "";
+                        m_textInputActive = true;
+                        SDL_StartTextInput();
+                        return; // Don't continue with other updates
+                    }
+                }
+            }
+            
             // Update bullets (check out of bounds)
             updateBullets(deltaTime);
             
@@ -2243,6 +2310,30 @@ class Game {
         
         void render() {
             SDL_Renderer* renderer = Engine::getRenderer();
+            
+            // If entering initials, only render the initials screen
+            if(m_enteringInitials) {
+                // Clear screen
+                SDL_SetRenderDrawColor(renderer, 135, 206, 235, 255); // Sky blue background
+                SDL_RenderClear(renderer);
+                
+                // Render initials entry screen
+                renderInitialsEntry(renderer);
+                SDL_RenderPresent(renderer);
+                return;
+            }
+            
+            // If showing high scores, only render the high scores screen
+            if(m_showingHighScores) {
+                // Clear screen
+                SDL_SetRenderDrawColor(renderer, 135, 206, 235, 255); // Sky blue background
+                SDL_RenderClear(renderer);
+                
+                // Render high scores screen
+                renderHighScores(renderer);
+                SDL_RenderPresent(renderer);
+                return;
+            }
             
             // Clear screen
             SDL_SetRenderDrawColor(renderer, 135, 206, 235, 255); // Sky blue background
@@ -2270,11 +2361,6 @@ class Game {
             
             // Render score in top left corner
             renderScore(renderer);
-            
-            // Render initials entry screen if active
-            if(m_enteringInitials) {
-                renderInitialsEntry(renderer);
-            }
             
             SDL_RenderPresent(renderer);
         }
@@ -2337,14 +2423,78 @@ class Game {
                 auto otherBody = otherObj->get<BodyComponent>();
                 auto otherSolid = otherObj->get<SolidComponent>();
                 auto otherEnemy = otherObj->get<EnemyComponent>();
+                auto otherKillZone = otherObj->get<KillZoneComponent>();
                 
                 if(!otherBody) continue;
                 
+                // Special check for kill zone: check Y position directly (prevents tunneling)
+                if(otherKillZone) {
+                    // Kill zone spans from otherBody->y to otherBody->y + otherBody->height
+                    // Player dies if their bottom (y + height) reaches or passes the kill zone top (y)
+                    float playerBottom = playerBody->y + playerBody->height;
+                    if(playerBottom >= otherBody->y) {
+                        std::cout << "Player died by touching kill zone! Player Y: " << playerBody->y 
+                                  << " (bottom: " << playerBottom 
+                                  << "), KillZone Y: " << otherBody->y << " to " << (otherBody->y + otherBody->height) << std::endl;
+                        
+                        // Stop the physics body immediately to prevent continued movement
+                        auto playerPhysics = playerObj->get<Box2DPhysicsComponent>();
+                        if (playerPhysics) {
+                            playerPhysics->stopBody();
+                        }
+                        
+                        playerController->die();
+                        
+                        // Stop background music
+                        SoundManager::getInstance().stopMusic();
+                        
+                        // Show initials entry screen
+                        m_enteringInitials = true;
+                        m_playerInitials = "";
+                        m_textInputActive = true;
+                        SDL_StartTextInput();
+                        
+                        return; // Stop checking other collisions
+                    }
+                }
+                
                 // Check player collisions - USE FULL BODY SIZE (no scaling)
                 if(CollisionSystem::checkCollision(playerBody, otherBody)) {
+                    // Check if it's a kill zone - if so, player dies (backup check via AABB)
+                    if(otherKillZone) {
+                        std::cout << "Player died by touching kill zone (AABB collision)! Player Y: " << playerBody->y 
+                                  << ", KillZone Y: " << otherBody->y << " to " << (otherBody->y + otherBody->height) << std::endl;
+                        
+                        // Stop the physics body immediately to prevent continued movement
+                        auto playerPhysics = playerObj->get<Box2DPhysicsComponent>();
+                        if (playerPhysics) {
+                            playerPhysics->stopBody();
+                        }
+                        
+                        playerController->die();
+                        
+                        // Stop background music
+                        SoundManager::getInstance().stopMusic();
+                        
+                        // Show initials entry screen
+                        m_enteringInitials = true;
+                        m_playerInitials = "";
+                        m_textInputActive = true;
+                        SDL_StartTextInput();
+                        
+                        return; // Stop checking other collisions
+                    }
+                    
                     // Check if it's an enemy - if so, player dies and respawns
                     if(otherEnemy) {
                         std::cout << "Player died by enemy collision!" << std::endl;
+                        
+                        // Stop the physics body immediately to prevent continued movement
+                        auto playerPhysics = playerObj->get<Box2DPhysicsComponent>();
+                        if (playerPhysics) {
+                            playerPhysics->stopBody();
+                        }
+                        
                         playerController->die();
                         
                         // Stop background music
@@ -2605,40 +2755,162 @@ class Game {
             XMLDocument doc;
             std::string filename = "scores.xml";
             
-            // Try to load existing file
+            // Load existing scores
+            std::vector<std::pair<std::string, int>> scores; // initials, score pairs
+            
             if (doc.LoadFile(filename.c_str()) == XML_SUCCESS) {
-                // File exists, add new entry
-            } else {
-                // File doesn't exist, create new
-                XMLElement* root = doc.NewElement("HighScores");
-                doc.InsertFirstChild(root);
+                XMLElement* root = doc.FirstChildElement("HighScores");
+                if (root) {
+                    XMLElement* scoreElem = root->FirstChildElement("Score");
+                    while (scoreElem) {
+                        const char* init = scoreElem->Attribute("initials");
+                        int val = scoreElem->IntAttribute("value");
+                        if (init && val >= 0) {
+                            scores.push_back({std::string(init), val});
+                        }
+                        scoreElem = scoreElem->NextSiblingElement("Score");
+                    }
+                }
             }
             
-            XMLElement* root = doc.FirstChildElement("HighScores");
-            if (!root) {
-                root = doc.NewElement("HighScores");
-                doc.InsertFirstChild(root);
+            // Add new score
+            scores.push_back({initials, score});
+            
+            // Sort by score (descending)
+            std::sort(scores.begin(), scores.end(), 
+                [](const std::pair<std::string, int>& a, const std::pair<std::string, int>& b) {
+                    return a.second > b.second;
+                });
+            
+            // Keep only top 10
+            if (scores.size() > 10) {
+                scores.resize(10);
             }
             
-            // Create new score entry
-            XMLElement* scoreEntry = doc.NewElement("Score");
-            scoreEntry->SetAttribute("initials", initials.c_str());
-            scoreEntry->SetAttribute("value", score);
+            // Store top 10 for display
+            m_highScores = scores;
             
-            // Add timestamp
-            time_t now = time(0);
-            char* dt = ctime(&now);
-            std::string timeStr(dt);
-            timeStr.pop_back(); // Remove newline
-            scoreEntry->SetAttribute("date", timeStr.c_str());
+            // Create new XML document with top 10 scores
+            doc.Clear();
+            XMLElement* root = doc.NewElement("HighScores");
+            doc.InsertFirstChild(root);
             
-            root->InsertEndChild(scoreEntry);
+            for (const auto& scorePair : scores) {
+                XMLElement* scoreEntry = doc.NewElement("Score");
+                scoreEntry->SetAttribute("initials", scorePair.first.c_str());
+                scoreEntry->SetAttribute("value", scorePair.second);
+                
+                // Add timestamp
+                time_t now = time(0);
+                char* dt = ctime(&now);
+                std::string timeStr(dt);
+                timeStr.pop_back(); // Remove newline
+                scoreEntry->SetAttribute("date", timeStr.c_str());
+                
+                root->InsertEndChild(scoreEntry);
+            }
             
             // Save file
             if (doc.SaveFile(filename.c_str()) == XML_SUCCESS) {
                 std::cout << "Score saved: " << initials << " - " << score << std::endl;
             } else {
                 std::cerr << "Failed to save score to XML" << std::endl;
+            }
+        }
+        
+        void loadHighScores() {
+            using namespace tinyxml2;
+            
+            XMLDocument doc;
+            std::string filename = "scores.xml";
+            
+            m_highScores.clear();
+            
+            if (doc.LoadFile(filename.c_str()) == XML_SUCCESS) {
+                XMLElement* root = doc.FirstChildElement("HighScores");
+                if (root) {
+                    XMLElement* scoreElem = root->FirstChildElement("Score");
+                    while (scoreElem) {
+                        const char* init = scoreElem->Attribute("initials");
+                        int val = scoreElem->IntAttribute("value");
+                        if (init && val >= 0) {
+                            m_highScores.push_back({std::string(init), val});
+                        }
+                        scoreElem = scoreElem->NextSiblingElement("Score");
+                    }
+                }
+            }
+            
+            // Sort by score (descending)
+            std::sort(m_highScores.begin(), m_highScores.end(), 
+                [](const std::pair<std::string, int>& a, const std::pair<std::string, int>& b) {
+                    return a.second > b.second;
+                });
+        }
+        
+        void renderHighScores(SDL_Renderer* renderer) {
+            if (!m_font) return;
+            
+            int screenWidth = 800;
+            int screenHeight = 600;
+            
+            // Draw semi-transparent overlay
+            SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200); // Darker overlay
+            SDL_Rect overlay = {0, 0, screenWidth, screenHeight};
+            SDL_RenderFillRect(renderer, &overlay);
+            
+            SDL_Color textColor = {255, 255, 255, 255}; // White
+            
+            // Render title
+            std::string titleText = "HIGH SCORES";
+            SDL_Surface* titleSurface = TTF_RenderText_Solid(m_font, titleText.c_str(), textColor);
+            if (titleSurface) {
+                SDL_Texture* titleTexture = SDL_CreateTextureFromSurface(renderer, titleSurface);
+                if (titleTexture) {
+                    int titleX = (screenWidth - titleSurface->w) / 2;
+                    int titleY = 100;
+                    SDL_Rect titleRect = {titleX, titleY, titleSurface->w, titleSurface->h};
+                    SDL_RenderCopy(renderer, titleTexture, NULL, &titleRect);
+                    SDL_DestroyTexture(titleTexture);
+                }
+                SDL_FreeSurface(titleSurface);
+            }
+            
+            // Render scores (up to 10)
+            int startY = 180;
+            int lineHeight = 35;
+            int maxScores = std::min(10, static_cast<int>(m_highScores.size()));
+            
+            for (int i = 0; i < maxScores; i++) {
+                std::string scoreText = std::to_string(i + 1) + ". " + m_highScores[i].first + " - " + std::to_string(m_highScores[i].second);
+                SDL_Surface* scoreSurface = TTF_RenderText_Solid(m_font, scoreText.c_str(), textColor);
+                if (scoreSurface) {
+                    SDL_Texture* scoreTexture = SDL_CreateTextureFromSurface(renderer, scoreSurface);
+                    if (scoreTexture) {
+                        int scoreX = (screenWidth - scoreSurface->w) / 2;
+                        int scoreY = startY + (i * lineHeight);
+                        SDL_Rect scoreRect = {scoreX, scoreY, scoreSurface->w, scoreSurface->h};
+                        SDL_RenderCopy(renderer, scoreTexture, NULL, &scoreRect);
+                        SDL_DestroyTexture(scoreTexture);
+                    }
+                    SDL_FreeSurface(scoreSurface);
+                }
+            }
+            
+            // Render instruction text
+            std::string instructionText = "Press ENTER to continue";
+            SDL_Surface* instructionSurface = TTF_RenderText_Solid(m_font, instructionText.c_str(), textColor);
+            if (instructionSurface) {
+                SDL_Texture* instructionTexture = SDL_CreateTextureFromSurface(renderer, instructionSurface);
+                if (instructionTexture) {
+                    int instructionX = (screenWidth - instructionSurface->w) / 2;
+                    int instructionY = screenHeight - 80;
+                    SDL_Rect instructionRect = {instructionX, instructionY, instructionSurface->w, instructionSurface->h};
+                    SDL_RenderCopy(renderer, instructionTexture, NULL, &instructionRect);
+                    SDL_DestroyTexture(instructionTexture);
+                }
+                SDL_FreeSurface(instructionSurface);
             }
         }
         
@@ -3060,6 +3332,20 @@ class Game {
             physics2->createBody(x, topBoxY, width, height);
             
             m_gameObjects.push_back(std::move(box2));
+        }
+        
+        void createKillZone(float x, float y, float width, float height) {
+            // Create invisible kill zone that kills player on contact
+            auto killZone = std::make_unique<GameObject>();
+            killZone->add<BodyComponent>(x, y, width, height);
+            killZone->add<KillZoneComponent>(); // Mark as kill zone
+            
+            // Create static physics body (invisible, no sprite)
+            auto physics = killZone->add<Box2DPhysicsComponent>(Box2DPhysicsComponent::STATIC, 0.0f, 0.0f, 0.0f);
+            physics->createBody(x, y, width, height);
+            
+            m_gameObjects.push_back(std::move(killZone));
+            std::cout << "Kill zone created at Y=" << y << " (width=" << width << ", height=" << height << ")" << std::endl;
         }
         
         void removeLastDynamicBody() {
@@ -3580,6 +3866,8 @@ class Game {
         bool m_enteringInitials = false;
         std::string m_playerInitials = "";
         bool m_textInputActive = false;
+        bool m_showingHighScores = false;
+        std::vector<std::pair<std::string, int>> m_highScores; // initials, score pairs
     };
 
 // ========================
