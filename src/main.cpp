@@ -1,6 +1,7 @@
 #include <SDL.h>
 #include <SDL_mixer.h>
 #include <SDL_ttf.h>
+#include <SDL_image.h>
 #include <iostream>
 #include <vector>
 #include <memory>
@@ -158,19 +159,33 @@ public:
             std::cout << "Removed old cached texture: " << textureKey << std::endl;
         }
         
-        // Load new texture
-        SDL_Surface* surface = SDL_LoadBMP(filePath.c_str());
+        // Load new texture - try IMG_Load first (supports PNG, BMP, etc.), then fall back to SDL_LoadBMP
+        SDL_Surface* surface = IMG_Load(filePath.c_str());
         if(!surface) {
-            std::cerr << "FAILED to load BMP: " << filePath << " - " << SDL_GetError() << std::endl;
-            surface = SDL_CreateRGBSurface(0, 64, 64, 32, 0, 0, 0, 0);
-            SDL_FillRect(surface, NULL, SDL_MapRGB(surface->format, 255, 0, 255));
+            // Fall back to BMP loader
+            surface = SDL_LoadBMP(filePath.c_str());
+            if(!surface) {
+                std::cerr << "FAILED to load image: " << filePath << " - " << SDL_GetError() << std::endl;
+                surface = SDL_CreateRGBSurface(0, 64, 64, 32, 0, 0, 0, 0);
+                SDL_FillRect(surface, NULL, SDL_MapRGB(surface->format, 255, 0, 255));
+            } else {
+                std::cout << "Successfully loaded BMP: " << surface->w << "x" << surface->h << std::endl;
+                
+                // Enable color keying to make white (255, 255, 255) transparent
+                // This removes the white background from sprites
+                Uint32 colorKey = SDL_MapRGB(surface->format, 255, 255, 255);
+                SDL_SetColorKey(surface, SDL_TRUE, colorKey);
+            }
         } else {
-            std::cout << "Successfully loaded BMP: " << surface->w << "x" << surface->h << std::endl;
+            std::cout << "Successfully loaded image: " << surface->w << "x" << surface->h << std::endl;
             
-            // Enable color keying to make white (255, 255, 255) transparent
-            // This removes the white background from sprites
-            Uint32 colorKey = SDL_MapRGB(surface->format, 255, 255, 255);
-            SDL_SetColorKey(surface, SDL_TRUE, colorKey);
+            // For PNG files with alpha channel, we don't need color keying
+            // But for BMP files loaded via IMG_Load, apply color keying
+            std::string extension = filePath.substr(filePath.find_last_of(".") + 1);
+            if (extension == "bmp" || extension == "BMP") {
+                Uint32 colorKey = SDL_MapRGB(surface->format, 255, 255, 255);
+                SDL_SetColorKey(surface, SDL_TRUE, colorKey);
+            }
         }
         
         SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
@@ -334,6 +349,13 @@ class Engine {
                 return false;
             }
             
+            // Initialize SDL_image
+            int imgFlags = IMG_INIT_PNG | IMG_INIT_JPG;
+            if(!(IMG_Init(imgFlags) & imgFlags)) {
+                std::cerr << "SDL_image initialization failed: " << IMG_GetError() << std::endl;
+                // Continue anyway, we can still use BMP files
+            }
+            
             // Initialize SDL_mixer
             if(Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0) {
                 std::cerr << "SDL_mixer initialization failed: " << Mix_GetError() << std::endl;
@@ -390,6 +412,7 @@ class Engine {
             if(m_renderer) SDL_DestroyRenderer(m_renderer);
             if(m_window) SDL_DestroyWindow(m_window);
             Mix_CloseAudio();
+            IMG_Quit();
             SDL_Quit();
         }
         
@@ -2910,8 +2933,8 @@ class Game {
             auto bullet = std::make_unique<GameObject>();
             
             // Bullet properties
-            const float bulletWidth = 8.0f;
-            const float bulletHeight = 8.0f;
+            const float bulletWidth = 24.0f;  // 3x original size (8 * 3)
+            const float bulletHeight = 24.0f; // 3x original size (8 * 3)
             const float bulletSpeed = 1600.0f; // pixels per second (16 m/s in Box2D)
             
             bullet->add<BodyComponent>(x, y, bulletWidth, bulletHeight);
@@ -2919,8 +2942,8 @@ class Game {
             // Add bullet component
             auto bulletComp = bullet->add<BulletComponent>(directionX, bulletSpeed);
             
-            // Add sprite (yellow/orange bullet)
-            auto bulletSprite = bullet->add<SpriteComponent>("", SDL_Color{255, 200, 0, 255});
+            // Add sprite with texture
+            auto bulletSprite = bullet->add<SpriteComponent>("bullet_texture");
             
             // Add Box2D physics
             auto bulletPhysics = bullet->add<Box2DPhysicsComponent>(
@@ -2980,10 +3003,17 @@ class Game {
                 }
                 
                 // Get player position - spawn bullet on the side player is facing
+                // Player sprite is 62x50, hitbox is 34x40, hitbox is bottom-aligned with 10px offset
+                // Gun is typically in upper-middle of sprite (~15-20px from top of sprite)
+                // Sprite top is at: playerBody->y - 10 (hitboxOffsetY)
+                // Gun position from sprite top: ~15px (slightly higher than before)
+                const float spriteTopY = playerBody->y - 10.0f; // hitboxOffsetY
+                const float gunOffsetFromSpriteTop = 7.5f; // Approximate gun position on sprite
+                
                 float bulletX = (directionX > 0) ? 
                     playerBody->x + playerBody->width : 
                     playerBody->x;
-                float bulletY = playerBody->y + playerBody->height / 2;
+                float bulletY = spriteTopY + gunOffsetFromSpriteTop;
                 
                 shootBullet(bulletX, bulletY, directionX);
                 m_playerShootTimer = 0.3f; // Show shooting animation for 0.3 seconds

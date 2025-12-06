@@ -4,6 +4,7 @@
     <Texture file="assets/enemy.bmp" key="enemy_texture" />
     <Texture file="assets/background.bmp" key="background_texture" />
     <Texture file="assets/tileset.bmp" key="tile_texture" />
+    <Texture file="assets/missile.png" key="bullet_texture" />
 
     <!-- Tiling Background -->
     <GameObject type="tiling_background">
