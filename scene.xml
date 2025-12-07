@@ -6,6 +6,8 @@
     <Texture file="assets/tileset.bmp" key="tile_texture" />
     <Texture file="assets/missile.png" key="bullet_texture" />
     <Texture file="assets/flag.bmp" key="flag_texture" />
+    <Texture file="assets/boss.bmp" key="boss_texture" />
+    <Texture file="assets/bossAttack.bmp" key="boss_attack_texture" />
 
     <!-- Tiling Background -->
     <GameObject type="tiling_background">
@@ -284,11 +286,34 @@
         <EnemyComponent />
     </GameObject>
 
+    <!-- Boss Room - Platform for boss fight -->
+    <GameObject type="boss_platform">
+        <BodyComponent x="7000" y="500" width="400" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="3" tileY="3" tileWidth="16" tileHeight="16" />
+        <SolidComponent />
+        <BossPlatformComponent />
+    </GameObject>
+
+    <!-- Boss Enemy -->
+    <GameObject type="boss">
+        <BodyComponent x="7200" y="436" width="83" height="64" />
+        <SpriteComponent textureKey="boss_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="8" />
+        <EnemyComponent />
+        <BossComponent />
+    </GameObject>
+
+    <!-- Platform 16 - After boss room, leading to checkpoint -->
+    <GameObject type="platform">
+        <BodyComponent x="7500" y="500" width="200" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="3" tileY="3" tileWidth="16" tileHeight="16" />
+        <SolidComponent />
+    </GameObject>
+
     <!-- Checkpoint Flag at the end of the map -->
-    <!-- Platform 15 is at x=7400, width=300, so center is at x=7550. Flag is 64px wide, so position at 7550-32=7518 -->
+    <!-- Platform 16 is at x=7500, width=200, so center is at x=7600. Flag is 64px wide, so position at 7600-32=7568 -->
     <!-- Flag body bottom is at y=500 (436+64), aligned with platform top -->
     <GameObject type="checkpoint">
-        <BodyComponent x="7518" y="436" width="64" height="64" />
+        <BodyComponent x="7568" y="436" width="64" height="64" />
         <SpriteComponent textureKey="flag_texture" />
     </GameObject>
 </Level>

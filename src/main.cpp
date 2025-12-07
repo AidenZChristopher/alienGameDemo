@@ -13,6 +13,7 @@
 #include <fstream>
 #include <string>
 #include <sstream>
+#include <iomanip>
 #include <box2d/box2d.h>
 #include <tinyxml2.h>
 #include <ctime>
@@ -24,7 +25,7 @@ class GameObject;
 class Component;
 class BodyComponent;
 class SpriteComponent;
-class ControllerComponent;
+class ControllerComponent; 
 class PhysicsComponent;
 class PatrolBehaviorComponent;
 class BounceBehaviorComponent;
@@ -2207,6 +2208,10 @@ class Game {
                 std::cerr << "Warning: Could not load font for score display. Score will not be visible." << std::endl;
             }
             
+            // Initialize and start timer when game first loads
+            m_gameTimer = 0.0f;
+            m_timerRunning = true;
+            
             std::cout << "=== GAME INITIALIZATION COMPLETE ===" << std::endl;
             std::cout << "Controls:" << std::endl;
             std::cout << "WASD - Move player (W=Jump, A=Left, D=Right)" << std::endl;
@@ -2389,6 +2394,11 @@ class Game {
                 }
             }
             
+            // Update game timer if it's running
+            if (m_timerRunning) {
+                m_gameTimer += deltaTime;
+            }
+            
             // Check for falling death AFTER GameObject update (to catch any falling)
             auto playerObj = findPlayer();
             if (playerObj) {
@@ -2412,6 +2422,10 @@ class Game {
                         }
                         
                         playerController->die();
+                        
+                        // Restart timer on death
+                        m_gameTimer = 0.0f;
+                        m_timerRunning = true;
                         
                         // Stop background music
                         SoundManager::getInstance().stopMusic();
@@ -2589,6 +2603,8 @@ class Game {
                         // Reset all game objects to initial positions
                         resetGameObjects();
                         
+                        // Timer is restarted in resetGameObjects(), so no need to restart here
+                        
                         // Stop background music
                         SoundManager::getInstance().stopMusic();
                         
@@ -2620,6 +2636,8 @@ class Game {
                         // Reset all game objects to initial positions
                         resetGameObjects();
                         
+                        // Timer is restarted in resetGameObjects(), so no need to restart here
+                        
                         // Stop background music
                         SoundManager::getInstance().stopMusic();
                         
@@ -2632,9 +2650,9 @@ class Game {
                         return; // Stop checking other collisions
                     }
                     
-                    // Check if it's a checkpoint - if so, player wins
+                    // Check if it's a checkpoint - if so, award points and restart game
                     if(otherCheckpoint) {
-                        std::cout << "Player reached checkpoint! You win!" << std::endl;
+                        std::cout << "Player reached checkpoint!" << std::endl;
                         
                         // Stop the physics body immediately
                         auto playerPhysics = playerObj->get<Box2DPhysicsComponent>();
@@ -2642,15 +2660,23 @@ class Game {
                             playerPhysics->stopBody();
                         }
                         
-                        // Stop background music
-                        SoundManager::getInstance().stopMusic();
+                        // Calculate points based on completion time
+                        int timeBonus = calculateTimeBonus(m_gameTimer);
+                        m_score += timeBonus;
                         
-                        // Set win state
-                        m_gameWon = true;
-                        m_enteringInitials = true;
-                        m_playerInitials = "";
-                        m_textInputActive = true;
-                        SDL_StartTextInput();
+                        // Log completion time and points
+                        int minutes = static_cast<int>(m_gameTimer) / 60;
+                        int seconds = static_cast<int>(m_gameTimer) % 60;
+                        std::cout << "Completion time: " << minutes << ":" << std::setfill('0') << std::setw(2) << seconds 
+                                  << " - Awarded " << timeBonus << " points! Total score: " << m_score << std::endl;
+                        
+                        // Reset all game objects to initial positions
+                        resetGameObjects();
+                        
+                        // Timer is restarted in resetGameObjects(), so no need to restart here
+                        
+                        // Restart background music
+                        SoundManager::getInstance().playMusic();
                         
                         return; // Stop checking other collisions
                     }
@@ -2843,13 +2869,43 @@ class Game {
             int textWidth = textSurface->w;
             int textHeight = textSurface->h;
             
-            // Render in top left corner (screen coordinates, not world coordinates)
+            // Render score in top left corner (screen coordinates, not world coordinates)
             SDL_Rect destRect = {10, 10, textWidth, textHeight}; // 10 pixels from top-left
             SDL_RenderCopy(renderer, textTexture, NULL, &destRect);
             
-            // Clean up
+            // Clean up score texture
             SDL_DestroyTexture(textTexture);
             SDL_FreeSurface(textSurface);
+            
+            // Format and render timer (MM:SS.mmm format)
+            int minutes = static_cast<int>(m_gameTimer) / 60;
+            int seconds = static_cast<int>(m_gameTimer) % 60;
+            int milliseconds = static_cast<int>((m_gameTimer - static_cast<int>(m_gameTimer)) * 1000);
+            
+            char timerBuffer[32];
+            std::snprintf(timerBuffer, sizeof(timerBuffer), "Time: %02d:%02d.%03d", minutes, seconds, milliseconds);
+            std::string timerText = timerBuffer;
+            
+            // Create timer text surface
+            SDL_Surface* timerSurface = TTF_RenderText_Solid(m_font, timerText.c_str(), textColor);
+            if (!timerSurface) {
+                return; // Failed to create timer surface
+            }
+            
+            // Create texture from surface
+            SDL_Texture* timerTexture = SDL_CreateTextureFromSurface(renderer, timerSurface);
+            if (!timerTexture) {
+                SDL_FreeSurface(timerSurface);
+                return; // Failed to create texture
+            }
+            
+            // Render timer below score (10 pixels below score, same left margin)
+            SDL_Rect timerRect = {10, 10 + textHeight + 5, timerSurface->w, timerSurface->h};
+            SDL_RenderCopy(renderer, timerTexture, NULL, &timerRect);
+            
+            // Clean up timer texture
+            SDL_DestroyTexture(timerTexture);
+            SDL_FreeSurface(timerSurface);
         }
         
         void renderInitialsEntry(SDL_Renderer* renderer) {
@@ -3092,12 +3148,48 @@ class Game {
             }
         }
         
+        // Calculate points based on completion time
+        int calculateTimeBonus(float timeInSeconds) {
+            if (timeInSeconds >= 120.0f) {
+                // Over 2 minutes = 0 points
+                return 0;
+            } else if (timeInSeconds >= 90.0f) {
+                // 1:30-2 minutes = 25 points
+                return 25;
+            } else if (timeInSeconds >= 60.0f) {
+                // 1 minute - 1:29 minutes = 50 points
+                return 50;
+            } else if (timeInSeconds >= 50.0f) {
+                // 50-59 seconds = 70 points
+                return 70;
+            } else if (timeInSeconds >= 40.0f) {
+                // 40-49 seconds = 80 points
+                return 80;
+            } else if (timeInSeconds >= 30.0f) {
+                // 30-39 seconds = 90 points
+                return 90;
+            } else if (timeInSeconds >= 20.0f) {
+                // 20-29 seconds = 100 points
+                return 100;
+            } else if (timeInSeconds >= 15.0f) {
+                // 15-19 seconds = 125 points
+                return 125;
+            } else {
+                // 0-14 seconds = 150 points
+                return 150;
+            }
+        }
+        
         void resetGame() {
             // Reset score
             m_score = 0;
             
             // Reset win state
             m_gameWon = false;
+            
+            // Reset and start timer
+            m_gameTimer = 0.0f;
+            m_timerRunning = true;
             
             // Reset player
             auto playerObj = findPlayer();
@@ -3587,6 +3679,10 @@ class Game {
                 }
             }
             
+            // Start timer when player spawns
+            m_gameTimer = 0.0f;
+            m_timerRunning = true;
+            
             std::cout << "Game objects reset complete." << std::endl;
         }
         
@@ -4054,7 +4150,9 @@ class Game {
                                 if (std::find(objectsToRemove.begin(), objectsToRemove.end(), hitObj) == objectsToRemove.end()) {
                                     objectsToRemove.push_back(hitObj);
                                 }
-                                std::cout << "Raycast detected bullet-enemy collision!" << std::endl;
+                                // Award points for killing enemy
+                                m_score += 10;
+                                std::cout << "Raycast detected bullet-enemy collision! Score: " << m_score << std::endl;
                             } else if (box) {
                                 if (std::find(objectsToRemove.begin(), objectsToRemove.end(), bulletObj) == objectsToRemove.end()) {
                                     objectsToRemove.push_back(bulletObj);
@@ -4156,6 +4254,10 @@ class Game {
         float m_musicPauseTimer = 0.0f; // Timer for music pause after death (3 seconds)
         int m_score = 0; // Player score
         TTF_Font* m_font = nullptr; // Font for rendering score
+        
+        // Game timer system
+        float m_gameTimer = 0.0f; // Elapsed time in seconds
+        bool m_timerRunning = false; // Whether the timer is currently running
         
         // Initials entry system
         bool m_enteringInitials = false;
