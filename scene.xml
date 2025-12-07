@@ -5,6 +5,7 @@
     <Texture file="assets/background.bmp" key="background_texture" />
     <Texture file="assets/tileset.bmp" key="tile_texture" />
     <Texture file="assets/missile.png" key="bullet_texture" />
+    <Texture file="assets/flag.bmp" key="flag_texture" />
 
     <!-- Tiling Background -->
     <GameObject type="tiling_background">
@@ -122,6 +123,13 @@
     <!-- Platform 14 - Long platform with destructible boxes (player must shoot through) -->
     <GameObject type="platform">
         <BodyComponent x="6200" y="500" width="1200" height="16" />
+        <SpriteComponent textureKey="tile_texture" tileX="3" tileY="3" tileWidth="16" tileHeight="16" />
+        <SolidComponent />
+    </GameObject>
+
+    <!-- Platform 15 - Final platform for checkpoint flag -->
+    <GameObject type="platform">
+        <BodyComponent x="7400" y="500" width="300" height="16" />
         <SpriteComponent textureKey="tile_texture" tileX="3" tileY="3" tileWidth="16" tileHeight="16" />
         <SolidComponent />
     </GameObject>
@@ -274,5 +282,13 @@
         <SpriteComponent textureKey="enemy_texture" spriteSheet="true" frameWidth="83" frameHeight="64" totalFrames="8" frameRate="10" />
         <BounceBehaviorComponent amplitude="75" frequency="2.1" />
         <EnemyComponent />
+    </GameObject>
+
+    <!-- Checkpoint Flag at the end of the map -->
+    <!-- Platform 15 is at x=7400, width=300, so center is at x=7550. Flag is 64px wide, so position at 7550-32=7518 -->
+    <!-- Flag body bottom is at y=500 (436+64), aligned with platform top -->
+    <GameObject type="checkpoint">
+        <BodyComponent x="7518" y="436" width="64" height="64" />
+        <SpriteComponent textureKey="flag_texture" />
     </GameObject>
 </Level>

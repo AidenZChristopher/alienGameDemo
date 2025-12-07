@@ -35,6 +35,7 @@ class Box2DPhysicsComponent;
 class Box2DContactListener;
 class BulletComponent;
 class DestructibleBoxComponent;
+class CheckpointComponent;
 
 // ========================
 // Camera
@@ -686,6 +687,16 @@ public:
     KillZoneComponent() = default;
     void update(float dt) override {}
     void draw(SDL_Renderer* renderer, const View& view) override {} // Invisible, no drawing
+};
+
+// ========================
+// Checkpoint Component
+// ========================
+class CheckpointComponent : public Component {
+public:
+    CheckpointComponent() = default;
+    void update(float dt) override {}
+    void draw(SDL_Renderer* renderer, const View& view) override {} // Drawing handled by SpriteComponent
 };
 
 class TilingBackgroundComponent : public Component {
@@ -1988,6 +1999,61 @@ class XMLParser {
                 }
             }
         }
+        else if (type == "checkpoint") {
+            // Checkpoint flag
+            float x = std::stof(attrs.at("x"));
+            float y = std::stof(attrs.at("y"));
+            float width = std::stof(attrs.at("width"));
+            float height = std::stof(attrs.at("height"));
+            
+            obj->add<BodyComponent>(x, y, width, height);
+            obj->add<CheckpointComponent>();
+            
+            // Add sprite for the flag
+            if (attrs.find("textureKey") != attrs.end() && !attrs.at("textureKey").empty()) {
+                auto sprite = obj->add<SpriteComponent>(attrs.at("textureKey"));
+                SDL_Texture* texture = textureManager.getTexture(attrs.at("textureKey"));
+                if (texture) {
+                    sprite->setTexture(texture);
+                }
+                
+                // Flag texture is a sprite sheet with 5 frames (320px wide), but we only want to show the first frame (static)
+                // Use setSourceRect to render only the first 64x64 frame from the sprite sheet
+                sprite->setSourceRect(0, 0, 64, 64); // First frame: x=0, y=0, width=64, height=64
+                sprite->setRenderSize(64.0f, 64.0f); // Render at 64x64
+                
+                // Check if sprite sheet should be configured (for animation - not used for flag)
+                if (attrs.find("spriteSheet") != attrs.end() && attrs.at("spriteSheet") == "true") {
+                    int frameWidth = std::stoi(attrs.at("frameWidth"));
+                    int frameHeight = std::stoi(attrs.at("frameHeight"));
+                    int totalFrames = std::stoi(attrs.at("totalFrames"));
+                    float frameRate = std::stof(attrs.at("frameRate"));
+                    
+                    // Check if framesPerRow is specified (for multi-row sprite sheets)
+                    int framesPerRow = totalFrames; // Default: assume single row
+                    if (attrs.find("framesPerRow") != attrs.end()) {
+                        framesPerRow = std::stoi(attrs.at("framesPerRow"));
+                    }
+                    
+                    std::cout << "=== CONFIGURING CHECKPOINT SPRITE SHEET ===" << std::endl;
+                    std::cout << "Frame: " << frameWidth << "x" << frameHeight << std::endl;
+                    std::cout << "Frames: " << totalFrames << " at " << frameRate << " fps" << std::endl;
+                    std::cout << "Frames per row: " << framesPerRow << std::endl;
+                    
+                    // Use 5-parameter version to support multi-row sprite sheets
+                    sprite->setSpriteSheet(frameWidth, frameHeight, totalFrames, framesPerRow, frameRate);
+                    
+                    // Ensure sprite renders at the same size as the body (64x64)
+                    // This ensures proper centering - sprite and body should align perfectly
+                    sprite->setRenderSize(static_cast<float>(frameWidth), static_cast<float>(frameHeight));
+                    
+                    // For flag animation: anchor at bottom so only top animates
+                    // Body position represents the top-left, but we want bottom to stay fixed
+                    // The body is already positioned so its bottom aligns with the platform
+                    // No render offset needed - the body position already accounts for bottom alignment
+                }
+            }
+        }
         else if (type == "tiling_background") {
             // Tiling background object - SAFELY get attributes
             std::string textureKey = "";
@@ -2298,6 +2364,12 @@ class Game {
                 if (m_playerShootTimer < 0.0f) m_playerShootTimer = 0.0f;
             }
             
+            // Update shooting cooldown timer
+            if (m_shootCooldown > 0.0f) {
+                m_shootCooldown -= deltaTime;
+                if (m_shootCooldown < 0.0f) m_shootCooldown = 0.0f;
+            }
+            
             // Update music pause timer (resume music after 3 seconds)
             if (m_musicPauseTimer > 0.0f) {
                 m_musicPauseTimer -= deltaTime;
@@ -2492,6 +2564,7 @@ class Game {
                 auto otherSolid = otherObj->get<SolidComponent>();
                 auto otherEnemy = otherObj->get<EnemyComponent>();
                 auto otherKillZone = otherObj->get<KillZoneComponent>();
+                auto otherCheckpoint = otherObj->get<CheckpointComponent>();
                 
                 if(!otherBody) continue;
                 
@@ -2551,6 +2624,29 @@ class Game {
                         SoundManager::getInstance().stopMusic();
                         
                         // Show initials entry screen
+                        m_enteringInitials = true;
+                        m_playerInitials = "";
+                        m_textInputActive = true;
+                        SDL_StartTextInput();
+                        
+                        return; // Stop checking other collisions
+                    }
+                    
+                    // Check if it's a checkpoint - if so, player wins
+                    if(otherCheckpoint) {
+                        std::cout << "Player reached checkpoint! You win!" << std::endl;
+                        
+                        // Stop the physics body immediately
+                        auto playerPhysics = playerObj->get<Box2DPhysicsComponent>();
+                        if (playerPhysics) {
+                            playerPhysics->stopBody();
+                        }
+                        
+                        // Stop background music
+                        SoundManager::getInstance().stopMusic();
+                        
+                        // Set win state
+                        m_gameWon = true;
                         m_enteringInitials = true;
                         m_playerInitials = "";
                         m_textInputActive = true;
@@ -2768,9 +2864,14 @@ class Game {
             SDL_Rect overlay = {0, 0, screenWidth, screenHeight};
             SDL_RenderFillRect(renderer, &overlay);
             
-            // Render prompt text
+            // Render win message or prompt text
             SDL_Color textColor = {255, 255, 255, 255}; // White
-            std::string promptText = "Enter Initials to Save Score";
+            std::string promptText;
+            if (m_gameWon) {
+                promptText = "YOU WIN! Enter Initials to Save Score";
+            } else {
+                promptText = "Enter Initials to Save Score";
+            }
             SDL_Surface* promptSurface = TTF_RenderText_Solid(m_font, promptText.c_str(), textColor);
             if (promptSurface) {
                 SDL_Texture* promptTexture = SDL_CreateTextureFromSurface(renderer, promptSurface);
@@ -2994,6 +3095,9 @@ class Game {
         void resetGame() {
             // Reset score
             m_score = 0;
+            
+            // Reset win state
+            m_gameWon = false;
             
             // Reset player
             auto playerObj = findPlayer();
@@ -3601,7 +3705,8 @@ class Game {
             bool mousePressed = (mouseState & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
             
             // Shoot on mouse click (left button) or J key
-            if ((mousePressed && !mouseWasPressed) || input.isKeyJustPressed(SDL_SCANCODE_J)) {
+            // Check if shooting cooldown has expired (limit to 1 shot per second)
+            if (((mousePressed && !mouseWasPressed) || input.isKeyJustPressed(SDL_SCANCODE_J)) && m_shootCooldown <= 0.0f) {
                 // Determine direction based on player facing or mouse position
                 float directionX = 1.0f; // Default to right
                 
@@ -3649,6 +3754,7 @@ class Game {
                 if (std::isfinite(bulletX) && std::isfinite(bulletY)) {
                     shootBullet(bulletX, bulletY, directionX);
                     m_playerShootTimer = 0.3f; // Show shooting animation for 0.3 seconds
+                    m_shootCooldown = 1.0f; // Set cooldown to 1 second (limit to 1 shot per second)
                     m_lastShootDirection = directionX; // Store direction for sprite flipping
                 } else {
                     std::cerr << "Warning: Invalid bullet position, cannot shoot" << std::endl;
@@ -4045,6 +4151,7 @@ class Game {
         float m_raycastTimer = 0.0f;
         float m_aabbTimer = 0.0f;
         float m_playerShootTimer = 0.0f; // Timer for shooting animation
+        float m_shootCooldown = 0.0f; // Cooldown timer to limit shooting rate (1 shot per second)
         float m_lastShootDirection = 1.0f; // Last shooting direction (1.0 = right, -1.0 = left)
         float m_musicPauseTimer = 0.0f; // Timer for music pause after death (3 seconds)
         int m_score = 0; // Player score
@@ -4055,6 +4162,7 @@ class Game {
         std::string m_playerInitials = "";
         bool m_textInputActive = false;
         bool m_showingHighScores = false;
+        bool m_gameWon = false; // Win state
         std::vector<std::pair<std::string, int>> m_highScores; // initials, score pairs
     };
 
