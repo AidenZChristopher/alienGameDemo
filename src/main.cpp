@@ -2673,6 +2673,12 @@ class Game {
                         // Reset all game objects to initial positions
                         resetGameObjects();
                         
+                        // Spawn additional enemies based on score
+                        int additionalEnemies = calculateAdditionalEnemies(m_score);
+                        if (additionalEnemies > 0) {
+                            spawnAdditionalEnemies(additionalEnemies);
+                        }
+                        
                         // Timer is restarted in resetGameObjects(), so no need to restart here
                         
                         // Restart background music
@@ -3146,6 +3152,106 @@ class Game {
                 }
                 SDL_FreeSurface(instructionSurface);
             }
+        }
+        
+        // Calculate number of additional enemies to spawn based on score
+        int calculateAdditionalEnemies(int score) {
+            // Base enemies are already in the level, so we add more based on score
+            // Every 50 points = 1 additional enemy, with a cap at 20 additional enemies
+            int additionalEnemies = std::min(score / 50, 20);
+            return additionalEnemies;
+        }
+        
+        // Spawn additional enemies based on score
+        void spawnAdditionalEnemies(int additionalCount) {
+            if (additionalCount <= 0) return;
+            
+            auto& textureManager = TextureManager::getInstance();
+            SDL_Texture* enemyTexture = textureManager.getTexture("enemy_texture");
+            if (!enemyTexture) {
+                std::cerr << "Warning: Cannot spawn additional enemies - enemy texture not loaded" << std::endl;
+                return;
+            }
+            
+            // Enemy tilesheet: 664x64 pixels, 1 row x 8 columns (8 frames total)
+            const int enemyFrameWidth = 83;   // 664 / 8
+            const int enemyFrameHeight = 64;  // 64 pixels tall
+            
+            // Find platforms to spawn enemies on
+            std::vector<std::pair<float, float>> spawnPositions; // (x, y) positions
+            std::vector<std::pair<float, float>> allPlatformPositions; // All platform positions
+            
+            // Look for platforms in the game objects
+            for (auto& obj : m_gameObjects) {
+                auto solid = obj->get<SolidComponent>();
+                auto body = obj->get<BodyComponent>();
+                
+                // If it's a solid platform (not the player, not a wall, not a box)
+                if (solid && body && !obj->get<ControllerComponent>() && 
+                    !obj->get<EnemyComponent>() && !obj->get<DestructibleBoxComponent>() &&
+                    !obj->get<KillZoneComponent>() && !obj->get<CheckpointComponent>()) {
+                    // Check if it's a reasonable platform size (not too small, not too large)
+                    if (body->width > 100.0f && body->width < 1000.0f && body->height < 50.0f) {
+                        // Spawn enemies on top of the platform
+                        float spawnX = body->x + body->width / 2.0f; // Center of platform
+                        float spawnY = body->y - enemyFrameHeight; // Above the platform
+                        allPlatformPositions.push_back({spawnX, spawnY});
+                    }
+                }
+            }
+            
+            // Sort platforms by X position to identify the first (leftmost) platform
+            std::sort(allPlatformPositions.begin(), allPlatformPositions.end(),
+                [](const std::pair<float, float>& a, const std::pair<float, float>& b) {
+                    return a.first < b.first;
+                });
+            
+            // Skip the first platform (leftmost) and add the rest
+            if (allPlatformPositions.size() > 1) {
+                // Start from index 1 to skip the first platform
+                for (size_t i = 1; i < allPlatformPositions.size(); ++i) {
+                    spawnPositions.push_back(allPlatformPositions[i]);
+                }
+            } else if (allPlatformPositions.size() == 1) {
+                // Only one platform found, don't spawn on it (it's the first platform)
+                // spawnPositions will remain empty
+            }
+            
+            // If no platforms found, use default positions
+            if (spawnPositions.empty()) {
+                // Default spawn positions at various X coordinates
+                float defaultY = 400.0f; // Default Y position
+                for (int i = 0; i < 10; ++i) {
+                    spawnPositions.push_back({500.0f + i * 200.0f, defaultY});
+                }
+            }
+            
+            // Spawn enemies at the positions
+            int enemiesSpawned = 0;
+            for (size_t i = 0; i < spawnPositions.size() && enemiesSpawned < additionalCount; ++i) {
+                float x = spawnPositions[i].first;
+                float y = spawnPositions[i].second;
+                
+                auto enemy = std::make_unique<GameObject>();
+                enemy->add<BodyComponent>(x, y, enemyFrameWidth, enemyFrameHeight);
+                enemy->add<EnemyComponent>();
+                
+                auto enemySprite = enemy->add<SpriteComponent>("enemy_texture");
+                enemySprite->setTexture(enemyTexture);
+                
+                // Configure sprite sheet
+                loadEnemySprite(enemySprite, enemyTexture);
+                
+                // Add physics (DYNAMIC for bouncing behavior)
+                auto enemyPhysics = enemy->add<Box2DPhysicsComponent>(
+                    Box2DPhysicsComponent::DYNAMIC, 1.0f, 0.3f, 0.3f);
+                enemyPhysics->createBody(x, y, enemyFrameWidth, enemyFrameHeight);
+                
+                m_gameObjects.push_back(std::move(enemy));
+                enemiesSpawned++;
+            }
+            
+            std::cout << "Spawned " << enemiesSpawned << " additional enemies based on score" << std::endl;
         }
         
         // Calculate points based on completion time
