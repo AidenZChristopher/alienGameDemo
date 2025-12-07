@@ -1229,6 +1229,13 @@ class SpriteComponent : public Component {
             m_texture = texture; 
         }
         
+        // Force sprite to render as full texture (not sprite sheet)
+        void setFullTextureMode() {
+            m_usingSpriteSheet = false;
+            m_usingCustomSource = false;
+            m_animated = false;
+        }
+        
         // For multi-row sprite sheets
         void setSpriteSheet(int frameWidth, int frameHeight, int totalFrames, int framesPerRow, float frameRate = 10.0f) {
             m_usingSpriteSheet = true;
@@ -1887,39 +1894,48 @@ class XMLParser {
         }
         else if (type == "platform" || type == "moving_platform") {
             // Platform
+            std::cout << "=== CREATING PLATFORM ===" << std::endl;
             float x = std::stof(attrs.at("x"));
             float y = std::stof(attrs.at("y"));
             float width = std::stof(attrs.at("width"));
             float height = std::stof(attrs.at("height"));
             
+            std::cout << "Platform position: (" << x << "," << y << ") size: " << width << "x" << height << std::endl;
+            
             obj->add<BodyComponent>(x, y, width, height);
             obj->add<SolidComponent>();
             
             // Handle sprite with texture or color
-            if (attrs.find("textureKey") != attrs.end() && !attrs.at("textureKey").empty()) {
-                auto sprite = obj->add<SpriteComponent>(attrs.at("textureKey"));
-                SDL_Texture* texture = textureManager.getTexture(attrs.at("textureKey"));
-                if (texture) {
-                    sprite->setTexture(texture);
-                    
-                    // === ADD TILE SUPPORT RIGHT HERE ===
-                    // Check if we should use a specific tile from the tilesheet
-                    if (attrs.find("tileX") != attrs.end() && attrs.find("tileY") != attrs.end()) {
-                        int tileX = std::stoi(attrs.at("tileX"));
-                        int tileY = std::stoi(attrs.at("tileY"));
-                        int tileWidth = std::stoi(attrs.at("tileWidth"));
-                        int tileHeight = std::stoi(attrs.at("tileHeight"));
-                        
-                        sprite->setTile(tileX, tileY, tileWidth, tileHeight);
-                        std::cout << "Platform using tile: " << tileX << "," << tileY 
-                                  << " (" << tileWidth << "x" << tileHeight << ")" << std::endl;
-                    }
-                    // === END OF TILE SUPPORT ===
-                }
-            } else if (attrs.find("color") != attrs.end()) {
+            // Always use platform_texture for platforms unless a non-empty color is provided
+            if (attrs.find("color") != attrs.end() && !attrs.at("color").empty()) {
+                std::cout << "Platform using COLOR instead of texture" << std::endl;
                 SDL_Color color = parseColor(attrs.at("color"));
                 obj->add<SpriteComponent>("", color);
+            } else {
+                // Force platforms to use platform_texture (ignore textureKey from XML for platforms)
+                std::string textureKey = "platform_texture";
+                std::cout << "Forcing platform to use textureKey: " << textureKey << " (ignoring XML textureKey: " 
+                          << (attrs.find("textureKey") != attrs.end() ? attrs.at("textureKey") : "none") << ")" << std::endl;
+                
+                // Create sprite WITHOUT textureKey to avoid lazy loading issues
+                auto sprite = obj->add<SpriteComponent>("");
+                SDL_Texture* texture = textureManager.getTexture(textureKey);
+                if (texture) {
+                    // Verify texture dimensions
+                    int texWidth, texHeight;
+                    SDL_QueryTexture(texture, NULL, NULL, &texWidth, &texHeight);
+                    
+                    sprite->setTexture(texture);
+                    // CRITICAL: Explicitly force sprite to render as full texture (not sprite sheet)
+                    sprite->setFullTextureMode();
+                    std::cout << "SUCCESS: Platform at (" << x << "," << y << ") using texture: " << textureKey 
+                              << " (full texture " << texWidth << "x" << texHeight << ", not sprite sheet)" << std::endl;
+                    std::cout << "  -> Sprite explicitly set to full texture mode (m_usingSpriteSheet=false)" << std::endl;
+                } else {
+                    std::cerr << "ERROR: Platform at (" << x << "," << y << ") texture not found: " << textureKey << std::endl;
+                }
             }
+            std::cout << "=== FINISHED CREATING PLATFORM ===" << std::endl;
             
             // Moving platform behavior
             if (type == "moving_platform") {
@@ -2163,6 +2179,25 @@ class Game {
                 return false;
             }
             testFile.close();
+            
+            // Manually load platform texture BEFORE loading XML to ensure it's available when platforms are created
+            auto& textureManager = TextureManager::getInstance();
+            SDL_Renderer* renderer = Engine::getRenderer();
+            
+            // Force reload the texture to clear any old cached version
+            SDL_Texture* oldTex = textureManager.getTexture("platform_texture");
+            if (oldTex) {
+                std::cout << "Clearing old platform_texture from cache..." << std::endl;
+            }
+            
+            SDL_Texture* platformTex = textureManager.loadTexture(renderer, "assets/platform.bmp", "platform_texture");
+            if (platformTex) {
+                int texWidth, texHeight;
+                SDL_QueryTexture(platformTex, NULL, NULL, &texWidth, &texHeight);
+                std::cout << "Platform texture loaded successfully! Dimensions: " << texWidth << "x" << texHeight << std::endl;
+            } else {
+                std::cerr << "WARNING: Failed to load platform texture! Check if assets/platform.bmp exists." << std::endl;
+            }
             
             // Load game objects from XML
             m_gameObjects = XMLComponentFactory::createFromXML(Engine::getRenderer(), "scene.xml");
@@ -2673,12 +2708,6 @@ class Game {
                         // Reset all game objects to initial positions
                         resetGameObjects();
                         
-                        // Spawn additional enemies based on score
-                        int additionalEnemies = calculateAdditionalEnemies(m_score);
-                        if (additionalEnemies > 0) {
-                            spawnAdditionalEnemies(additionalEnemies);
-                        }
-                        
                         // Timer is restarted in resetGameObjects(), so no need to restart here
                         
                         // Restart background music
@@ -3154,106 +3183,6 @@ class Game {
             }
         }
         
-        // Calculate number of additional enemies to spawn based on score
-        int calculateAdditionalEnemies(int score) {
-            // Base enemies are already in the level, so we add more based on score
-            // Every 50 points = 1 additional enemy, with a cap at 20 additional enemies
-            int additionalEnemies = std::min(score / 50, 20);
-            return additionalEnemies;
-        }
-        
-        // Spawn additional enemies based on score
-        void spawnAdditionalEnemies(int additionalCount) {
-            if (additionalCount <= 0) return;
-            
-            auto& textureManager = TextureManager::getInstance();
-            SDL_Texture* enemyTexture = textureManager.getTexture("enemy_texture");
-            if (!enemyTexture) {
-                std::cerr << "Warning: Cannot spawn additional enemies - enemy texture not loaded" << std::endl;
-                return;
-            }
-            
-            // Enemy tilesheet: 664x64 pixels, 1 row x 8 columns (8 frames total)
-            const int enemyFrameWidth = 83;   // 664 / 8
-            const int enemyFrameHeight = 64;  // 64 pixels tall
-            
-            // Find platforms to spawn enemies on
-            std::vector<std::pair<float, float>> spawnPositions; // (x, y) positions
-            std::vector<std::pair<float, float>> allPlatformPositions; // All platform positions
-            
-            // Look for platforms in the game objects
-            for (auto& obj : m_gameObjects) {
-                auto solid = obj->get<SolidComponent>();
-                auto body = obj->get<BodyComponent>();
-                
-                // If it's a solid platform (not the player, not a wall, not a box)
-                if (solid && body && !obj->get<ControllerComponent>() && 
-                    !obj->get<EnemyComponent>() && !obj->get<DestructibleBoxComponent>() &&
-                    !obj->get<KillZoneComponent>() && !obj->get<CheckpointComponent>()) {
-                    // Check if it's a reasonable platform size (not too small, not too large)
-                    if (body->width > 100.0f && body->width < 1000.0f && body->height < 50.0f) {
-                        // Spawn enemies on top of the platform
-                        float spawnX = body->x + body->width / 2.0f; // Center of platform
-                        float spawnY = body->y - enemyFrameHeight; // Above the platform
-                        allPlatformPositions.push_back({spawnX, spawnY});
-                    }
-                }
-            }
-            
-            // Sort platforms by X position to identify the first (leftmost) platform
-            std::sort(allPlatformPositions.begin(), allPlatformPositions.end(),
-                [](const std::pair<float, float>& a, const std::pair<float, float>& b) {
-                    return a.first < b.first;
-                });
-            
-            // Skip the first platform (leftmost) and add the rest
-            if (allPlatformPositions.size() > 1) {
-                // Start from index 1 to skip the first platform
-                for (size_t i = 1; i < allPlatformPositions.size(); ++i) {
-                    spawnPositions.push_back(allPlatformPositions[i]);
-                }
-            } else if (allPlatformPositions.size() == 1) {
-                // Only one platform found, don't spawn on it (it's the first platform)
-                // spawnPositions will remain empty
-            }
-            
-            // If no platforms found, use default positions
-            if (spawnPositions.empty()) {
-                // Default spawn positions at various X coordinates
-                float defaultY = 400.0f; // Default Y position
-                for (int i = 0; i < 10; ++i) {
-                    spawnPositions.push_back({500.0f + i * 200.0f, defaultY});
-                }
-            }
-            
-            // Spawn enemies at the positions
-            int enemiesSpawned = 0;
-            for (size_t i = 0; i < spawnPositions.size() && enemiesSpawned < additionalCount; ++i) {
-                float x = spawnPositions[i].first;
-                float y = spawnPositions[i].second;
-                
-                auto enemy = std::make_unique<GameObject>();
-                enemy->add<BodyComponent>(x, y, enemyFrameWidth, enemyFrameHeight);
-                enemy->add<EnemyComponent>();
-                
-                auto enemySprite = enemy->add<SpriteComponent>("enemy_texture");
-                enemySprite->setTexture(enemyTexture);
-                
-                // Configure sprite sheet
-                loadEnemySprite(enemySprite, enemyTexture);
-                
-                // Add physics (DYNAMIC for bouncing behavior)
-                auto enemyPhysics = enemy->add<Box2DPhysicsComponent>(
-                    Box2DPhysicsComponent::DYNAMIC, 1.0f, 0.3f, 0.3f);
-                enemyPhysics->createBody(x, y, enemyFrameWidth, enemyFrameHeight);
-                
-                m_gameObjects.push_back(std::move(enemy));
-                enemiesSpawned++;
-            }
-            
-            std::cout << "Spawned " << enemiesSpawned << " additional enemies based on score" << std::endl;
-        }
-        
         // Calculate points based on completion time
         int calculateTimeBonus(float timeInSeconds) {
             if (timeInSeconds >= 120.0f) {
@@ -3313,16 +3242,22 @@ class Game {
         // ========================
         // Box2D Demo Methods
         // ========================
-        void createPlatform(float x, float y, float width, float height, SDL_Texture* tileTexture) {
+        void createPlatform(float x, float y, float width, float height, SDL_Texture* platformTexture) {
             auto platform = std::make_unique<GameObject>();
             platform->add<BodyComponent>(x, y, width, height);
-            auto platformSprite = platform->add<SpriteComponent>("tile_texture");
-            if (tileTexture) {
-                platformSprite->setTexture(tileTexture);
-                platformSprite->setTile(2, 3, 16, 16); // Use ground tile from tileset
+            // Create sprite with empty textureKey, then explicitly set texture to avoid sprite sheet confusion
+            auto platformSprite = platform->add<SpriteComponent>("");
+            if (platformTexture) {
+                platformSprite->setTexture(platformTexture);
+                int texWidth, texHeight;
+                SDL_QueryTexture(platformTexture, NULL, NULL, &texWidth, &texHeight);
+                std::cout << "createPlatform: Using platform texture " << texWidth << "x" << texHeight << " (full texture)" << std::endl;
+            } else {
+                std::cerr << "WARNING: createPlatform called with null platformTexture!" << std::endl;
             }
             auto platformPhysics = platform->add<Box2DPhysicsComponent>(Box2DPhysicsComponent::STATIC, 0.0f, 0.7f, 0.1f);
             platformPhysics->createBody(x, y, width, height);
+            platform->add<SolidComponent>();
             m_gameObjects.push_back(std::move(platform));
         }
         
@@ -3335,7 +3270,9 @@ class Game {
             textureManager.loadTexture(renderer, "assets/character.bmp", "player_texture");
             textureManager.loadTexture(renderer, "assets/enemy.bmp", "enemy_texture");
             textureManager.loadTexture(renderer, "assets/tileset.bmp", "tile_texture");
+            textureManager.loadTexture(renderer, "assets/platform.bmp", "platform_texture");
             
+            SDL_Texture* platformTexture = textureManager.getTexture("platform_texture");
             SDL_Texture* tileTexture = textureManager.getTexture("tile_texture");
             
             // Create tiling background
@@ -3353,13 +3290,13 @@ class Game {
             const float platform2Width = 300.0f;
             
             // Create first platform (empty - no enemies)
-            createPlatform(platform1X, platformY, platform1Width, platformHeight, tileTexture);
+            createPlatform(platform1X, platformY, platform1Width, platformHeight, platformTexture);
             
             // Create second platform (with enemies)
-            createPlatform(platform2X, platformY, platform2Width, platformHeight, tileTexture);
+            createPlatform(platform2X, platformY, platform2Width, platformHeight, platformTexture);
             
             // Create bottom ground/platform at bottom of screen for safety
-            createPlatform(0, 550, 800, 50, tileTexture);
+            createPlatform(0, 550, 800, 50, platformTexture);
             
             // Create left wall with tileset
             auto leftWall = std::make_unique<GameObject>();
