@@ -1093,6 +1093,34 @@ class SpriteComponent : public Component {
             
             // If we have a texture, use it
             if(m_texture) {
+                // Tiled rendering (repeat texture instead of stretch)
+                if (m_enableTiling && m_tileWidth > 0 && m_tileHeight > 0) {
+                    int texW = m_tileWidth;
+                    int texH = m_tileHeight;
+                    for (float ty = 0; ty < renderHeight; ty += texH) {
+                        float remainingH = renderHeight - ty;
+                        int drawH = static_cast<int>(std::min<float>(texH, remainingH));
+                        for (float tx = 0; tx < renderWidth; tx += texW) {
+                            float remainingW = renderWidth - tx;
+                            int drawW = static_cast<int>(std::min<float>(texW, remainingW));
+                            
+                            SDL_Rect tileDest = view.getTransformedRect(renderX + tx, renderY + ty, drawW, drawH);
+                            SDL_Rect tileSrc  = {0, 0, drawW, drawH};
+                            
+                            // Clamp to texture size
+                            if (tileSrc.w > texW) tileSrc.w = texW;
+                            if (tileSrc.h > texH) tileSrc.h = texH;
+                            
+                            if (m_flipHorizontal) {
+                                SDL_RenderCopyEx(renderer, m_texture, &tileSrc, &tileDest, 0.0, NULL, SDL_FLIP_HORIZONTAL);
+                            } else {
+                                SDL_RenderCopy(renderer, m_texture, &tileSrc, &tileDest);
+                            }
+                        }
+                    }
+                    return;
+                }
+                
                 // For custom source rectangle (specific tile coordinates)
                 if(m_usingCustomSource) {
                     SDL_RenderCopy(renderer, m_texture, &m_customSrcRect, &destRect);
@@ -1228,6 +1256,21 @@ class SpriteComponent : public Component {
         void setTexture(SDL_Texture* texture) { 
             m_texture = texture; 
         }
+
+        // Enable tiling with explicit tile size
+        void enableTiling(int tileWidth, int tileHeight) {
+            m_enableTiling = true;
+            m_tileWidth = tileWidth;
+            m_tileHeight = tileHeight;
+        }
+        
+        // Enable tiling using the texture's full dimensions
+        void enableTilingFromTexture() {
+            if (!m_texture) return;
+            int texW = 0, texH = 0;
+            SDL_QueryTexture(m_texture, nullptr, nullptr, &texW, &texH);
+            enableTiling(texW, texH);
+        }
         
         // Force sprite to render as full texture (not sprite sheet)
         void setFullTextureMode() {
@@ -1337,6 +1380,11 @@ class SpriteComponent : public Component {
         SDL_Color m_color;
         SDL_Texture* m_texture;
         SDL_Rect m_customSrcRect = {0, 0, 0, 0};
+        
+        // Tiling support (repeat texture instead of stretching)
+        bool m_enableTiling = false;
+        int m_tileWidth = 0;
+        int m_tileHeight = 0;
     
         // Sprite sheet animation properties
         bool m_usingSpriteSheet = false;
@@ -1928,6 +1976,8 @@ class XMLParser {
                     sprite->setTexture(texture);
                     // CRITICAL: Explicitly force sprite to render as full texture (not sprite sheet)
                     sprite->setFullTextureMode();
+                    // Repeat texture across platform width/height instead of stretching
+                    sprite->enableTilingFromTexture();
                     std::cout << "SUCCESS: Platform at (" << x << "," << y << ") using texture: " << textureKey 
                               << " (full texture " << texWidth << "x" << texHeight << ", not sprite sheet)" << std::endl;
                     std::cout << "  -> Sprite explicitly set to full texture mode (m_usingSpriteSheet=false)" << std::endl;
@@ -3249,6 +3299,8 @@ class Game {
             auto platformSprite = platform->add<SpriteComponent>("");
             if (platformTexture) {
                 platformSprite->setTexture(platformTexture);
+                platformSprite->setFullTextureMode();
+                platformSprite->enableTilingFromTexture();
                 int texWidth, texHeight;
                 SDL_QueryTexture(platformTexture, NULL, NULL, &texWidth, &texHeight);
                 std::cout << "createPlatform: Using platform texture " << texWidth << "x" << texHeight << " (full texture)" << std::endl;
