@@ -30,6 +30,9 @@ class PhysicsComponent;
 class PatrolBehaviorComponent;
 class BounceBehaviorComponent;
 class HorizontalMoveBehaviorComponent;
+class VisionComponent;
+class HearingComponent;
+class ReactiveAIComponent;
 class SolidComponent;
 class EnemyComponent;
 class Box2DPhysicsComponent;
@@ -1599,6 +1602,312 @@ private:
     float m_lastPlatformX = 0.0f;
 };
 
+// ========================
+// Reactive AI Components
+// ========================
+
+// VisionComponent - Detects player within vision cone
+class VisionComponent : public Component {
+public:
+    VisionComponent(float viewDistance = 300.0f, float viewAngle = 90.0f) 
+        : m_viewDistance(viewDistance), m_viewAngle(viewAngle), m_canSeePlayer(false) {}
+    
+    void update(float dt) override {
+        // Vision state is reset in processReactiveAI() before checking
+        // No need to reset here
+    }
+    
+    // Reset vision state (called by processReactiveAI at start of frame)
+    void resetVision() {
+        m_canSeePlayer = false;
+        m_lastSeenPosition = {0, 0};
+    }
+    
+    void draw(SDL_Renderer* renderer, const View& view) override {}
+    
+    // Check if player is visible (called by ReactiveAIComponent)
+    bool checkVision(GameObject* player) {
+        if (!player) return false;
+        
+        auto enemyBody = parent().get<BodyComponent>();
+        auto playerBody = player->get<BodyComponent>();
+        
+        if (!enemyBody || !playerBody) return false;
+        
+        // Calculate enemy center position
+        float enemyCenterX = enemyBody->x + enemyBody->width / 2.0f;
+        float enemyCenterY = enemyBody->y + enemyBody->height / 2.0f;
+        
+        // Calculate player center position
+        float playerCenterX = playerBody->x + playerBody->width / 2.0f;
+        float playerCenterY = playerBody->y + playerBody->height / 2.0f;
+        
+        // Calculate distance to player
+        float dx = playerCenterX - enemyCenterX;
+        float dy = playerCenterY - enemyCenterY;
+        float distance = std::sqrt(dx * dx + dy * dy);
+        
+        // Check if player is within view distance
+        if (distance > m_viewDistance) {
+            return false;
+        }
+        
+        // Calculate angle to player (in degrees)
+        float angleToPlayer = std::atan2(dy, dx) * 180.0f / 3.14159f;
+        
+        // Determine enemy facing direction (based on velocity)
+        // Default to facing right if velocity is near zero
+        float enemyFacingAngle = 0.0f; // Default: facing right
+        if (enemyBody->velocityX < -0.1f) {
+            enemyFacingAngle = 180.0f; // Facing left
+        } else if (enemyBody->velocityX > 0.1f) {
+            enemyFacingAngle = 0.0f; // Facing right
+        }
+        // If velocity is near zero, default to facing right (0 degrees)
+        
+        // Normalize angle to -180 to 180 range
+        float angleDiff = angleToPlayer - enemyFacingAngle;
+        while (angleDiff > 180.0f) angleDiff -= 360.0f;
+        while (angleDiff < -180.0f) angleDiff += 360.0f;
+        
+        // Check if player is within vision cone (half angle on each side)
+        float halfAngle = m_viewAngle / 2.0f;
+        if (std::abs(angleDiff) > halfAngle) {
+            return false;
+        }
+        
+        // Simple line-of-sight check: raycast to player (check for solid objects in the way)
+        // For now, we'll do a simple check - in a full implementation, you'd use Box2D raycasts
+        // This is a simplified version that checks if there are solid objects between enemy and player
+        
+        m_canSeePlayer = true;
+        m_lastSeenPosition = {playerCenterX, playerCenterY};
+        
+        // Debug output (can be removed later)
+        static int debugCounter = 0;
+        if (debugCounter++ % 60 == 0) { // Print every 60 frames (~1 second)
+            std::cout << "ENEMY SEES PLAYER! Distance: " << distance 
+                      << ", Angle diff: " << angleDiff << " degrees" << std::endl;
+        }
+        
+        return true;
+    }
+    
+    bool canSeePlayer() const { return m_canSeePlayer; }
+    std::pair<float, float> getLastSeenPosition() const { return m_lastSeenPosition; }
+    float getViewDistance() const { return m_viewDistance; }
+    float getViewAngle() const { return m_viewAngle; }
+    
+private:
+    float m_viewDistance;
+    float m_viewAngle; // Total angle of vision cone in degrees
+    bool m_canSeePlayer;
+    std::pair<float, float> m_lastSeenPosition;
+};
+
+// HearingComponent - Detects sound events (shooting, jumping, etc.)
+class HearingComponent : public Component {
+public:
+    HearingComponent(float hearingRange = 350.0f) 
+        : m_hearingRange(hearingRange), m_heardSound(false), m_soundPosition({0, 0}) {}
+    
+    void update(float dt) override {
+        // Reset sound detection each frame (sounds are momentary events)
+        m_heardSound = false;
+    }
+    
+    void draw(SDL_Renderer* renderer, const View& view) override {}
+    
+    // Check if a sound event is within hearing range
+    void checkSound(float soundX, float soundY) {
+        auto enemyBody = parent().get<BodyComponent>();
+        if (!enemyBody) return;
+        
+        float enemyCenterX = enemyBody->x + enemyBody->width / 2.0f;
+        float enemyCenterY = enemyBody->y + enemyBody->height / 2.0f;
+        
+        float dx = soundX - enemyCenterX;
+        float dy = soundY - enemyCenterY;
+        float distance = std::sqrt(dx * dx + dy * dy);
+        
+        if (distance <= m_hearingRange) {
+            m_heardSound = true;
+            m_soundPosition = {soundX, soundY};
+        }
+    }
+    
+    bool hasHeardSound() const { return m_heardSound; }
+    std::pair<float, float> getSoundPosition() const { return m_soundPosition; }
+    float getHearingRange() const { return m_hearingRange; }
+    
+private:
+    float m_hearingRange;
+    bool m_heardSound;
+    std::pair<float, float> m_soundPosition;
+};
+
+// ReactiveAIComponent - Combines vision and hearing to control enemy behavior
+class ReactiveAIComponent : public Component {
+public:
+    enum class AIState {
+        Patrol,  // Normal patrolling behavior
+        Alert,   // Heard something, investigating
+        Chase    // Actively chasing player
+    };
+    
+    ReactiveAIComponent(float chaseSpeed = 150.0f, float alertDuration = 3.0f) 
+        : m_chaseSpeed(chaseSpeed), m_alertDuration(alertDuration), 
+          m_currentState(AIState::Patrol), m_alertTimer(0.0f), m_targetPosition({0, 0}) {}
+    
+    void update(float dt) override {
+        auto body = parent().get<BodyComponent>();
+        if (!body) return;
+        
+        auto vision = parent().get<VisionComponent>();
+        auto hearing = parent().get<HearingComponent>();
+        
+        // Update alert timer
+        if (m_alertTimer > 0.0f) {
+            m_alertTimer -= dt;
+            if (m_alertTimer <= 0.0f) {
+                m_alertTimer = 0.0f;
+                // Return to patrol if alert expires and no longer seeing/hearing
+                if (m_currentState == AIState::Alert && vision && hearing && 
+                    !vision->canSeePlayer() && !hearing->hasHeardSound()) {
+                    m_currentState = AIState::Patrol;
+                }
+            }
+        }
+        
+        // State machine logic - check vision first (highest priority)
+        // Note: vision->checkVision() is called in processReactiveAI() before component updates
+        AIState previousState = m_currentState;
+        
+        if (vision && vision->canSeePlayer()) {
+            // Player is visible - chase immediately
+            m_currentState = AIState::Chase;
+            m_targetPosition = vision->getLastSeenPosition();
+            m_alertTimer = m_alertDuration; // Reset alert timer
+            if (previousState != AIState::Chase) {
+                auto bounce = parent().get<BounceBehaviorComponent>();
+                std::string enemyType = bounce ? "FLYING" : "GROUND";
+                std::cout << enemyType << " ENEMY: Switching to CHASE state (saw player)" << std::endl;
+            }
+        } else if (hearing && hearing->hasHeardSound()) {
+            // Heard a sound - go to alert state and investigate
+            if (m_currentState == AIState::Patrol) {
+                m_currentState = AIState::Alert;
+                std::cout << "ENEMY: Switching to ALERT state (heard sound)" << std::endl;
+            }
+            m_targetPosition = hearing->getSoundPosition();
+            m_alertTimer = m_alertDuration;
+        } else if (m_currentState != AIState::Patrol && m_alertTimer <= 0.0f) {
+            // No vision or hearing, and alert expired - return to patrol
+            if (previousState != AIState::Patrol) {
+                std::cout << "ENEMY: Returning to PATROL state" << std::endl;
+                
+                // For flying enemies, ensure gravity stays disabled (they should float)
+                auto bounce = parent().get<BounceBehaviorComponent>();
+                if (bounce) {
+                    auto physics = parent().get<Box2DPhysicsComponent>();
+                    if (physics && IsValid(physics->getBodyId())) {
+                        b2Body_SetGravityScale(physics->getBodyId(), 0.0f);
+                    }
+                }
+            }
+            m_currentState = AIState::Patrol;
+        }
+        
+        // Execute behavior based on current state
+        if (m_currentState == AIState::Chase || m_currentState == AIState::Alert) {
+            // Override patrol behavior - move toward target position
+            float enemyCenterX = body->x + body->width / 2.0f;
+            float enemyCenterY = body->y + body->height / 2.0f;
+            
+            float dx = m_targetPosition.first - enemyCenterX;
+            float dy = m_targetPosition.second - enemyCenterY;
+            float distance = std::sqrt(dx * dx + dy * dy);
+            
+            // Check if this is a flying enemy (has BounceBehaviorComponent)
+            auto bounce = parent().get<BounceBehaviorComponent>();
+            bool isFlyingEnemy = (bounce != nullptr);
+            
+            // For flying enemies, allow both horizontal and vertical movement
+            // For ground enemies, only horizontal movement
+            if (isFlyingEnemy) {
+                // Flying enemy - move in both directions
+                if (std::abs(dx) > 5.0f || std::abs(dy) > 5.0f) {
+                    // Normalize direction vector and scale by chase speed
+                    float norm = std::sqrt(dx * dx + dy * dy);
+                    if (norm > 0.0f) {
+                        body->velocityX = (dx / norm) * m_chaseSpeed;
+                        body->velocityY = (dy / norm) * m_chaseSpeed;
+                    }
+                    
+                    // Update Box2D physics if available
+                    auto physics = parent().get<Box2DPhysicsComponent>();
+                    if (physics && IsValid(physics->getBodyId())) {
+                        // For flying enemies, ensure gravity is disabled (should already be disabled, but make sure)
+                        b2Body_SetGravityScale(physics->getBodyId(), 0.0f);
+                        
+                        // Set velocity directly
+                        b2Body_SetLinearVelocity(physics->getBodyId(), 
+                            b2Vec2{body->velocityX / 100.0f, body->velocityY / 100.0f});
+                        
+                        // Debug output for flying enemies
+                        static int flyDebugCounter = 0;
+                        if (flyDebugCounter++ % 60 == 0) {
+                            std::cout << "FLYING ENEMY CHASING: velX=" << body->velocityX 
+                                      << ", velY=" << body->velocityY << ", dx=" << dx << ", dy=" << dy << std::endl;
+                        }
+                    }
+                } else {
+                    // Reached target, stop moving
+                    body->velocityX = 0.0f;
+                    body->velocityY = 0.0f;
+                    auto physics = parent().get<Box2DPhysicsComponent>();
+                    if (physics && IsValid(physics->getBodyId())) {
+                        b2Body_SetLinearVelocity(physics->getBodyId(), b2Vec2{0.0f, 0.0f});
+                    }
+                }
+            } else {
+                // Ground enemy - only horizontal movement
+                if (std::abs(dx) > 5.0f) { // Small threshold to prevent jittering
+                    float directionX = (dx > 0) ? 1.0f : -1.0f;
+                    body->velocityX = directionX * m_chaseSpeed;
+                    
+                    // Update Box2D physics if available
+                    auto physics = parent().get<Box2DPhysicsComponent>();
+                    if (physics && IsValid(physics->getBodyId())) {
+                        b2Vec2 currentVel = b2Body_GetLinearVelocity(physics->getBodyId());
+                        b2Body_SetLinearVelocity(physics->getBodyId(), b2Vec2{body->velocityX / 100.0f, currentVel.y});
+                    }
+                } else {
+                    // Reached target, stop moving
+                    body->velocityX = 0.0f;
+                    auto physics = parent().get<Box2DPhysicsComponent>();
+                    if (physics && IsValid(physics->getBodyId())) {
+                        b2Vec2 currentVel = b2Body_GetLinearVelocity(physics->getBodyId());
+                        b2Body_SetLinearVelocity(physics->getBodyId(), b2Vec2{0.0f, currentVel.y});
+                    }
+                }
+            }
+        }
+        // If in Patrol state, let PatrolBehaviorComponent handle movement (don't override velocity)
+    }
+    
+    void draw(SDL_Renderer* renderer, const View& view) override {}
+    
+    AIState getState() const { return m_currentState; }
+    
+private:
+    float m_chaseSpeed;
+    float m_alertDuration;
+    AIState m_currentState;
+    float m_alertTimer;
+    std::pair<float, float> m_targetPosition;
+};
+
 // Behavior Components
 class PatrolBehaviorComponent : public Component {
 public:
@@ -1607,6 +1916,17 @@ public:
     void update(float dt) override {
         auto body = parent().get<BodyComponent>();
         if(!body) return;
+        
+        // Check if ReactiveAIComponent is active and in Chase/Alert state
+        // If so, don't override the AI-controlled movement
+        auto reactiveAI = parent().get<ReactiveAIComponent>();
+        if (reactiveAI) {
+            auto aiState = reactiveAI->getState();
+            if (aiState != ReactiveAIComponent::AIState::Patrol) {
+                // AI is controlling movement, don't interfere
+                return;
+            }
+        }
         
         // Get Box2D physics component if it exists
         auto physics = parent().get<Box2DPhysicsComponent>();
@@ -1640,17 +1960,57 @@ public:
         auto body = parent().get<BodyComponent>();
         if(!body) return;
         
+        // Check if ReactiveAIComponent is active and in Chase/Alert state
+        // If so, let the AI control movement (it will handle both X and Y for flying enemies)
+        auto reactiveAI = parent().get<ReactiveAIComponent>();
+        if (reactiveAI) {
+            auto aiState = reactiveAI->getState();
+            if (aiState != ReactiveAIComponent::AIState::Patrol) {
+                // AI is controlling movement, don't interfere with bounce
+                // CRITICAL: Don't modify body->y at all when chasing, as it conflicts with physics
+                // Update baseY to current position so bounce can resume later when returning to patrol
+                if (baseY == 0) baseY = body->y;
+                // Also update time so bounce animation doesn't jump when resuming
+                time += dt;
+                return;
+            }
+        }
+        
         if(baseY == 0) baseY = body->y;
         time += dt;
         
-        // Store previous position
-        body->prevY = body->y;
+        // Calculate target Y position for bouncing
+        float targetY = baseY + amplitude * std::sin(frequency * time);
         
-        // Only modify Y position for bouncing
-        body->y = baseY + amplitude * std::sin(frequency * time);
-        
-        // Calculate velocity
-        body->velocityY = (body->y - body->prevY) / dt;
+        // For Box2D physics, set velocity instead of directly modifying position
+        // This prevents conflicts with the physics system
+        auto physics = parent().get<Box2DPhysicsComponent>();
+        if (physics && IsValid(physics->getBodyId())) {
+            // Calculate velocity needed to reach target Y
+            float currentY = body->y;
+            float deltaY = targetY - currentY;
+            float velocityY = deltaY / dt;
+            
+            // Clamp velocity to prevent extreme values
+            const float maxVelocity = 500.0f;
+            if (velocityY > maxVelocity) velocityY = maxVelocity;
+            if (velocityY < -maxVelocity) velocityY = -maxVelocity;
+            
+            // Get current X velocity to preserve horizontal movement
+            b2Vec2 currentVel = b2Body_GetLinearVelocity(physics->getBodyId());
+            
+            // Set velocity (preserve X, update Y for bounce)
+            b2Body_SetLinearVelocity(physics->getBodyId(), 
+                b2Vec2{currentVel.x, velocityY / 100.0f});
+            
+            // Update body component velocity for consistency
+            body->velocityY = velocityY;
+        } else {
+            // Fallback: direct position modification if no physics
+            body->prevY = body->y;
+            body->y = targetY;
+            body->velocityY = (body->y - body->prevY) / dt;
+        }
     }
     
     void draw(SDL_Renderer* renderer, const View& view) override {}    
@@ -2007,7 +2367,7 @@ class XMLParser {
             
             // Add Box2D physics component to enemies
             // Patrolling enemies (type="enemy") use KINEMATIC to prevent falling
-            // Flying enemies (type="flying_enemy") use DYNAMIC to allow gravity/bouncing
+            // Flying enemies (type="flying_enemy") use DYNAMIC but with gravity disabled (they float)
             Box2DPhysicsComponent::BodyType bodyType = (type == "enemy") ? 
                 Box2DPhysicsComponent::KINEMATIC : 
                 Box2DPhysicsComponent::DYNAMIC;
@@ -2019,6 +2379,14 @@ class XMLParser {
                 0.3f   // restitution
             );
             enemyPhysics->createBody(x, y, width, height);
+            
+            // For flying enemies, disable gravity so they don't fall
+            if (type == "flying_enemy") {
+                if (IsValid(enemyPhysics->getBodyId())) {
+                    b2Body_SetGravityScale(enemyPhysics->getBodyId(), 0.0f);
+                    std::cout << "Flying enemy: Gravity disabled" << std::endl;
+                }
+            }
             
             auto sprite = obj->add<SpriteComponent>(attrs.at("textureKey"));
             SDL_Texture* texture = textureManager.getTexture(attrs.at("textureKey"));
@@ -2042,6 +2410,30 @@ class XMLParser {
             
             // Enemy behavior
             if (type == "enemy") {
+                // Add reactive AI components (vision, hearing, and reactive AI controller)
+                float viewDistance = 300.0f;
+                float viewAngle = 90.0f;
+                float hearingRange = 350.0f;
+                float chaseSpeed = 150.0f;
+                
+                // Parse optional AI attributes from XML
+                if (attrs.find("viewDistance") != attrs.end()) {
+                    viewDistance = std::stof(attrs.at("viewDistance"));
+                }
+                if (attrs.find("viewAngle") != attrs.end()) {
+                    viewAngle = std::stof(attrs.at("viewAngle"));
+                }
+                if (attrs.find("hearingRange") != attrs.end()) {
+                    hearingRange = std::stof(attrs.at("hearingRange"));
+                }
+                if (attrs.find("chaseSpeed") != attrs.end()) {
+                    chaseSpeed = std::stof(attrs.at("chaseSpeed"));
+                }
+                
+                obj->add<VisionComponent>(viewDistance, viewAngle);
+                obj->add<HearingComponent>(hearingRange);
+                obj->add<ReactiveAIComponent>(chaseSpeed, 3.0f);
+                
                 // Only add PatrolBehaviorComponent if the attributes exist
                 if (attrs.find("left") != attrs.end() && 
                     attrs.find("right") != attrs.end() && 
@@ -2054,7 +2446,35 @@ class XMLParser {
                 } else {
                     std::cerr << "Warning: Enemy at (" << x << "," << y << ") missing PatrolBehaviorComponent attributes" << std::endl;
                 }
+                
+                std::cout << "Added ReactiveAI to enemy: viewDistance=" << viewDistance 
+                          << ", viewAngle=" << viewAngle << ", hearingRange=" << hearingRange 
+                          << ", chaseSpeed=" << chaseSpeed << std::endl;
             } else if (type == "flying_enemy") {
+                // Add reactive AI components to flying enemies as well
+                float viewDistance = 300.0f;
+                float viewAngle = 90.0f;
+                float hearingRange = 350.0f;
+                float chaseSpeed = 150.0f;
+                
+                // Parse optional AI attributes from XML
+                if (attrs.find("viewDistance") != attrs.end()) {
+                    viewDistance = std::stof(attrs.at("viewDistance"));
+                }
+                if (attrs.find("viewAngle") != attrs.end()) {
+                    viewAngle = std::stof(attrs.at("viewAngle"));
+                }
+                if (attrs.find("hearingRange") != attrs.end()) {
+                    hearingRange = std::stof(attrs.at("hearingRange"));
+                }
+                if (attrs.find("chaseSpeed") != attrs.end()) {
+                    chaseSpeed = std::stof(attrs.at("chaseSpeed"));
+                }
+                
+                obj->add<VisionComponent>(viewDistance, viewAngle);
+                obj->add<HearingComponent>(hearingRange);
+                obj->add<ReactiveAIComponent>(chaseSpeed, 3.0f);
+                
                 // Only add BounceBehaviorComponent if the attributes exist
                 if (attrs.find("amplitude") != attrs.end() && 
                     attrs.find("frequency") != attrs.end()) {
@@ -2064,6 +2484,10 @@ class XMLParser {
                 } else {
                     std::cerr << "Warning: Flying enemy at (" << x << "," << y << ") missing BounceBehaviorComponent attributes" << std::endl;
                 }
+                
+                std::cout << "Added ReactiveAI to flying enemy: viewDistance=" << viewDistance 
+                          << ", viewAngle=" << viewAngle << ", hearingRange=" << hearingRange 
+                          << ", chaseSpeed=" << chaseSpeed << std::endl;
             }
         }
         else if (type == "checkpoint") {
@@ -2471,6 +2895,9 @@ class Game {
             
             // Update player animations based on state
             updatePlayerAnimations();
+            
+            // Process reactive AI (vision and hearing checks) before updating objects
+            processReactiveAI();
             
             // Update all game objects using proper deltaTime
             for(auto& obj : m_gameObjects) {
@@ -3866,7 +4293,44 @@ class Game {
             // Play shoot sound effect
             SoundManager::getInstance().playSound("shoot_sound");
             
+            // Broadcast sound event to all enemies with hearing
+            broadcastSoundEvent(x, y);
+            
             std::cout << "Bullet shot at (" << x << ", " << y << ") direction: " << directionX << std::endl;
+        }
+        
+        // Broadcast sound event to all enemies with HearingComponent
+        void broadcastSoundEvent(float soundX, float soundY) {
+            for (auto& obj : m_gameObjects) {
+                if (!obj->isActive) continue;
+                
+                auto hearing = obj->get<HearingComponent>();
+                if (hearing) {
+                    hearing->checkSound(soundX, soundY);
+                }
+            }
+        }
+        
+        // Process reactive AI (vision and hearing checks)
+        void processReactiveAI() {
+            auto playerObj = findPlayer();
+            if (!playerObj) return;
+            
+            auto playerBody = playerObj->get<BodyComponent>();
+            if (!playerBody) return;
+            
+            // Reset all vision states first, then check vision for all enemies
+            for (auto& obj : m_gameObjects) {
+                if (!obj->isActive) continue;
+                
+                auto vision = obj->get<VisionComponent>();
+                if (vision) {
+                    // Reset vision state at start of frame
+                    vision->resetVision();
+                    // Check if player is visible
+                    vision->checkVision(playerObj);
+                }
+            }
         }
         
         void handleShooting() {
