@@ -3319,42 +3319,7 @@ class Game {
         }
         
         void renderDebugInfo(SDL_Renderer* renderer) {
-            View& mainView = Engine::getMainView(); // Add this line if missing
-            
-            auto playerObj = findPlayer();
-            if (playerObj) {
-                auto playerBody = playerObj->get<BodyComponent>();
-                if (playerBody) {
-                    // Draw the ACTUAL collision box (full size - no scaling)
-                    SDL_Rect debugRect = mainView.getTransformedRect(
-                        playerBody->x,  // No offset
-                        playerBody->y,  // No offset
-                        playerBody->width,  // Full width
-                        playerBody->height  // Full height
-                    );
-                    
-                    SDL_SetRenderDrawColor(renderer, 255, 0, 0, 128); // Semi-transparent red
-                    SDL_RenderDrawRect(renderer, &debugRect);
-                    
-                    // The visual bounds are the same as collision bounds now
-                    // So we don't need the green box, or keep it to show they're identical
-                    // Draw green rectangle using the ACTUAL BodyComponent dimensions
-                    SDL_Rect visualRect = mainView.getTransformedRect(
-                        playerBody->x, playerBody->y, 
-                        playerBody->width,  // Use actual width from BodyComponent
-                        playerBody->height  // Use actual height from BodyComponent
-                    );
-                    SDL_SetRenderDrawColor(renderer, 0, 255, 0, 64); // Semi-transparent green
-                    SDL_RenderDrawRect(renderer, &visualRect);
-                    
-                    // Debug: Print dimensions occasionally to verify they're correct
-                    static int debugCounter = 0;
-                    if (debugCounter++ % 300 == 0) {
-                        std::cout << "DEBUG: Green rectangle dimensions - width: " << playerBody->width 
-                                  << ", height: " << playerBody->height << std::endl;
-                    }
-                }
-            }
+            // Debug hitbox visualization removed
         }
         
         void renderScore(SDL_Renderer* renderer) {
@@ -4197,8 +4162,21 @@ class Game {
                     if(physics) {
                         physics->destroyBody();
                         physics->createBody(100.0f, 400.0f, body->width, body->height);
+                        
+                        // Ensure body has zero velocity
+                        if(IsValid(physics->getBodyId())) {
+                            b2Body_SetLinearVelocity(physics->getBodyId(), b2Vec2{0.0f, 0.0f});
+                        }
                     }
                 }
+            }
+            
+            // Step the Box2D world a few times to let everything settle and detect collisions
+            // This ensures the player body properly collides with platforms after reset
+            auto& box2dWorld = Box2DWorld::getInstance();
+            const float stepTime = 1.0f / 60.0f; // 60 FPS step time
+            for(int i = 0; i < 3; ++i) {
+                box2dWorld.update(stepTime);
             }
             
             // Start timer when player spawns

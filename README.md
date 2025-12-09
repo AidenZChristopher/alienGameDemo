@@ -30,9 +30,10 @@ This engine demonstrates a modern game architecture where gameplay logic is divi
 
 ### 🎯 **Gameplay Systems**
 - **Player Controller**: Movement, jumping, and physics-based interaction
-- **Enemy AI**: Patrolling and bouncing enemy behaviors
+- **Reactive Enemy AI**: Vision cone detection, hearing system, and dynamic state-based behavior (Patrol, Alert, Chase)
 - **Bullet System**: Projectile physics with collision detection
 - **Destructible Objects**: Boxes that can be destroyed by bullets
+- **Sound Event System**: Broadcasts sound events that enemies can detect and react to
 
 ### 📁 **Asset & Level Management**
 - **XML-Based Level Loading**: Create levels using XML configuration files
@@ -61,6 +62,9 @@ Each GameObject can have multiple components attached to define its behavior:
 | **Box2DPhysicsComponent** | Full Box2D physics integration |
 | **PatrolBehaviorComponent** | Controls patrolling enemy AI movement |
 | **BounceBehaviorComponent** | Controls bouncing enemy movement |
+| **VisionComponent** | Implements vision cone detection for enemies (300 unit range, configurable angle) |
+| **HearingComponent** | Detects sound events within hearing range (350 unit range) |
+| **ReactiveAIComponent** | State-based AI system (Patrol, Alert, Chase) that responds to vision and hearing |
 | **SolidComponent** | Marks objects for collision |
 | **EnemyComponent** | Marks objects as enemies |
 | **BulletComponent** | Manages projectile behavior |
@@ -110,6 +114,39 @@ The engine stores a static View instance initialized during startup, and all ren
 The engine includes a frame rate limiter to maintain consistent FPS. A static `deltaTime` variable stores the duration of the last frame, ensuring consistent movement and animation speeds across all systems.
 
 ### Frame Rate Management
-The engine includes a frame rate limiter to maintain consistent FPS. A static `deltaTime` variable stores the duration of the last frame, ensuring consistent movement and animation speeds across all systems
+The engine includes a frame rate limiter to maintain consistent FPS. A static `deltaTime` variable stores the duration of the last frame, ensuring consistent movement and animation speeds across all systems.
 
+### Reactive AI System
+
+The engine features a sophisticated reactive AI system that allows enemies to detect and respond to the player through vision and hearing:
+
+#### Vision System
+- **VisionComponent**: Implements a vision cone detection system
+  - **View Distance**: 300 units (configurable via XML)
+  - **View Angle**: Configurable field of view angle
+  - **Facing Detection**: Automatically determines enemy facing direction based on movement
+  - **Line of Sight**: Calculates distance and angle to player to determine visibility
+
+#### Hearing System
+- **HearingComponent**: Detects sound events within a specified range
+  - **Hearing Range**: 350 units (configurable via XML)
+  - **Sound Broadcasting**: Game events (e.g., shooting) broadcast sound events at their location
+  - **Position Tracking**: Stores the position of detected sounds for AI navigation
+
+#### AI State Machine
+- **ReactiveAIComponent**: Implements a three-state AI system:
+  - **Patrol State**: Default behavior, follows patrol paths or bouncing patterns
+  - **Alert State**: Triggered when a sound is heard but player is not visible; enemy moves toward sound location
+  - **Chase State**: Triggered when player is visible; enemy actively pursues the player
+- **State Transitions**:
+  - Patrol → Alert: Sound detected within hearing range
+  - Alert → Chase: Player becomes visible
+  - Alert → Patrol: Alert timer expires without seeing player
+  - Chase → Patrol: Player moves out of vision range and no recent sounds
+
+#### Integration
+- Works seamlessly with existing behavior components (`PatrolBehaviorComponent`, `BounceBehaviorComponent`)
+- Behavior components automatically yield control when AI enters Alert or Chase states
+- Supports both ground-based and flying enemies
+- Fully configurable via XML level definitions
 
